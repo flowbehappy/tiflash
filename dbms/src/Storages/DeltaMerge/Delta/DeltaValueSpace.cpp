@@ -275,9 +275,13 @@ bool DeltaValueSpace::compact(DMContext & context)
             LOG_FMT_DEBUG(log, "{} Compact stop because structure got updated", simpleInfo());
             return false;
         }
-        // reset to 0 after minor compaction success
-        last_try_compact_column_files.store(0);
-        LOG_FMT_DEBUG(log, "{} {}", simpleInfo(), compaction_task->info());
+        // Reset to the index of first file that can be compacted if the minor compaction succeed,
+        // and it may trigger another minor compaction if there is still too many column files.
+        // This process will stop when there is no more minor compaction to be done.
+        auto first_compact_index = compaction_task->getFirsCompactIndex();
+        RUNTIME_ASSERT(first_compact_index != std::numeric_limits<size_t>::max(), log);
+        last_try_compact_column_files.store(first_compact_index);
+        // LOG_DEBUG(log, "{} delta={}", compaction_task->info(), info());
     }
     wbs.writeRemoves();
 
