@@ -101,7 +101,7 @@ bool GCManager::work()
     LOG_DEBUG(log, "End GC and next gc will start with table id: {}", next_table_id);
     gc_check_stop_watch.restart();
     // Always return false
-    return false;
+    return true;
 }
 
 } // namespace DB
