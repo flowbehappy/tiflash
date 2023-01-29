@@ -70,7 +70,7 @@ PageDirectoryFactory<Trait>::createFromReader(const String & storage_name, WALSt
             // So we need to use `getLastEntry` instead of `getEntry(version)` here.
             if (auto entry = entries->getLastEntry(std::nullopt); entry)
             {
-                blob_stats->restoreByEntry(*entry);
+                blob_stats->restoreByEntry(entry);
             }
         }
 
@@ -122,7 +122,7 @@ PageDirectoryFactory<Trait>::createFromEdit(const String & storage_name, FilePro
             // So we need to use `getLastEntry` instead of `getEntry(version)` here.
             if (auto entry = entries->getLastEntry(std::nullopt); entry)
             {
-                blob_stats->restoreByEntry(*entry);
+                blob_stats->restoreByEntry(entry);
             }
         }
 

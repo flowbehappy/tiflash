@@ -42,6 +42,7 @@ extern const int LOGICAL_ERROR;
 
 namespace PS::V3
 {
+
 template <typename Trait>
 class BlobStore : private Allocator<false>
 {
@@ -49,9 +50,9 @@ public:
     using PageId = typename Trait::PageId;
     using PageEntries = PageEntriesV3;
     using PageEntriesEdit = DB::PS::V3::PageEntriesEdit<PageId>;
-    using GcEntries = std::vector<std::tuple<PageId, PageVersion, PageEntryV3>>;
+    using GcEntries = std::vector<std::tuple<PageId, PageVersion, PageEntryV3Ptr>>;
     using GcEntriesMap = std::map<BlobFileId, GcEntries>;
-    using PageIdAndEntry = std::pair<PageId, PageEntryV3>;
+    using PageIdAndEntry = std::pair<PageId, PageEntryV3Ptr>;
     using PageIdAndEntries = std::vector<PageIdAndEntry>;
     using PageMap = typename Trait::PageMap;
 
@@ -82,10 +83,10 @@ public:
     struct FieldReadInfo
     {
         PageId page_id;
-        PageEntryV3 entry;
+        PageEntryV3Ptr entry;
         std::vector<size_t> fields;
 
-        FieldReadInfo(const PageId & id_, PageEntryV3 entry_, std::vector<size_t> fields_)
+        FieldReadInfo(const PageId & id_, const PageEntryV3Ptr & entry_, std::vector<size_t> fields_)
             : page_id(id_)
             , entry(entry_)
             , fields(std::move(fields_))

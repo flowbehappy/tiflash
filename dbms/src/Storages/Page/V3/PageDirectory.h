@@ -85,7 +85,7 @@ struct EntryOrDelete
 {
     bool is_delete = true;
     Int64 being_ref_count = 1;
-    PageEntryV3 entry;
+    PageEntryV3Ptr entry;
 
     static EntryOrDelete newDelete()
     {
@@ -95,7 +95,7 @@ struct EntryOrDelete
             .entry = {}, // meaningless
         };
     }
-    static EntryOrDelete newNormalEntry(const PageEntryV3 & entry)
+    static EntryOrDelete newNormalEntry(const PageEntryV3Ptr & entry)
     {
         return EntryOrDelete{
             .is_delete = false,
@@ -103,7 +103,7 @@ struct EntryOrDelete
             .entry = entry,
         };
     }
-    static EntryOrDelete newReplacingEntry(const EntryOrDelete & ori_entry, const PageEntryV3 & entry)
+    static EntryOrDelete newReplacingEntry(const EntryOrDelete & ori_entry, const PageEntryV3Ptr & entry)
     {
         return EntryOrDelete{
             .is_delete = false,
@@ -112,7 +112,7 @@ struct EntryOrDelete
         };
     }
 
-    static EntryOrDelete newFromRestored(PageEntryV3 entry, Int64 being_ref_count)
+    static EntryOrDelete newFromRestored(PageEntryV3Ptr entry, Int64 being_ref_count)
     {
         return EntryOrDelete{
             .is_delete = false,
@@ -129,7 +129,7 @@ struct EntryOrDelete
         return fmt::format(
             "{{is_delete:{}, entry:{}, being_ref_count:{}}}",
             is_delete,
-            ::DB::PS::V3::toDebugString(entry),
+            entry->toDebugString(),
             being_ref_count);
     }
 };
@@ -150,7 +150,7 @@ public:
     using PageId = typename Trait::PageId;
     using PageEntriesEdit = DB::PS::V3::PageEntriesEdit<PageId>;
 
-    using GcEntries = std::vector<std::tuple<PageId, PageVersion, PageEntryV3>>;
+    using GcEntries = std::vector<std::tuple<PageId, PageVersion, PageEntryV3Ptr>>;
     using GcEntriesMap = std::map<BlobFileId, GcEntries>;
 
 public:
@@ -170,13 +170,13 @@ public:
         return std::lock_guard(m);
     }
 
-    void createNewEntry(const PageVersion & ver, const PageEntryV3 & entry);
+    void createNewEntry(const PageVersion & ver, const PageEntryV3Ptr & entry);
 
     // Commit the upsert entry after full gc.
     // Return a PageId, if the page id is valid, it means it rewrite a RefPage into
     // a normal Page. Caller must call `derefAndClean` to decrease the ref-count of
     // the returing page id.
-    [[nodiscard]] PageId createUpsertEntry(const PageVersion & ver, const PageEntryV3 & entry);
+    [[nodiscard]] PageId createUpsertEntry(const PageVersion & ver, const PageEntryV3Ptr & entry);
 
     bool createNewRef(const PageVersion & ver, const PageId & ori_page_id);
 
@@ -187,13 +187,13 @@ public:
     std::shared_ptr<PageId> fromRestored(const typename PageEntriesEdit::EditRecord & rec);
 
     std::tuple<ResolveResult, PageId, PageVersion>
-    resolveToPageId(UInt64 seq, bool ignore_delete, PageEntryV3 * entry);
+    resolveToPageId(UInt64 seq, bool ignore_delete, PageEntryV3Ptr * entry);
 
     Int64 incrRefCount(const PageVersion & ver);
 
-    std::optional<PageEntryV3> getEntry(UInt64 seq) const;
+    PageEntryV3Ptr getEntry(UInt64 seq) const;
 
-    std::optional<PageEntryV3> getLastEntry(std::optional<UInt64> seq) const;
+    PageEntryV3Ptr getLastEntry(std::optional<UInt64> seq) const;
 
     bool isVisible(UInt64 seq) const;
 
@@ -303,13 +303,13 @@ public:
     using PageId = typename Trait::PageId;
     using PageEntriesEdit = DB::PS::V3::PageEntriesEdit<PageId>;
 
-    using GcEntries = std::vector<std::tuple<PageId, PageVersion, PageEntryV3>>;
+    using GcEntries = std::vector<std::tuple<PageId, PageVersion, PageEntryV3Ptr>>;
     using GcEntriesMap = std::map<BlobFileId, GcEntries>;
 
     using PageIdSet = std::set<PageId>;
     using PageIds = std::vector<PageId>;
-    using PageEntries = std::vector<PageEntryV3>;
-    using PageIdAndEntry = std::pair<PageId, PageEntryV3>;
+    using PageEntries = std::vector<PageEntryV3Ptr>;
+    using PageIdAndEntry = std::pair<PageId, PageEntryV3Ptr>;
     using PageIdAndEntries = std::vector<PageIdAndEntry>;
 
 public:

@@ -152,12 +152,12 @@ DB::PageEntry PageStorageImpl::getEntryImpl(NamespaceId ns_id, PageIdU64 page_id
         // TODO : after `PageEntry` in page.h been moved to v2.
         // Then we don't copy from V3 to V2 format
         PageEntry entry_ret;
-        entry_ret.file_id = entry.file_id;
-        entry_ret.offset = entry.offset;
-        entry_ret.tag = entry.tag;
-        entry_ret.size = entry.size;
-        entry_ret.field_offsets = entry.field_offsets;
-        entry_ret.checksum = entry.checksum;
+        entry_ret.file_id = entry->getFileId();
+        entry_ret.offset = entry->getOffset();
+        entry_ret.tag = entry->getTag();
+        entry_ret.size = entry->getSize();
+        entry_ret.field_offsets = entry->getFieldOffsets();
+        entry_ret.checksum = entry->getCheckSum();
 
         return entry_ret;
     }
@@ -224,7 +224,7 @@ PageMapU64 PageStorageImpl::readImpl(NamespaceId ns_id, const std::vector<PageRe
     {
         const auto & [id, entry] = throw_on_not_exist ? page_directory->getByID(buildV3Id(ns_id, page_id), snapshot) : page_directory->getByIDOrNull(buildV3Id(ns_id, page_id), snapshot);
 
-        if (entry.isValid())
+        if (entry->isValid())
         {
             auto info = BlobStore<u128::BlobStoreTrait>::FieldReadInfo(buildV3Id(ns_id, page_id), entry, field_indices);
             read_infos.emplace_back(info);

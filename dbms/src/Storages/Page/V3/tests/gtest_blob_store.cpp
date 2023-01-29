@@ -85,30 +85,27 @@ try
     blob_store.registerPaths();
 
     {
-        blob_store.blob_stats.restoreByEntry(PageEntryV3{
-            .file_id = file_id1,
-            .size = 128,
-            .padded_size = 0,
-            .tag = 0,
-            .offset = 1024,
-            .checksum = 0x4567,
-        });
-        blob_store.blob_stats.restoreByEntry(PageEntryV3{
-            .file_id = file_id1,
-            .size = 512,
-            .padded_size = 0,
-            .tag = 0,
-            .offset = 2048,
-            .checksum = 0x4567,
-        });
-        blob_store.blob_stats.restoreByEntry(PageEntryV3{
-            .file_id = file_id2,
-            .size = 512,
-            .padded_size = 0,
-            .tag = 0,
-            .offset = 2048,
-            .checksum = 0x4567,
-        });
+        blob_store.blob_stats.restoreByEntry(makePageEntry(
+            file_id1,
+            128,
+            0,
+            0,
+            1024,
+            0x4567));
+        blob_store.blob_stats.restoreByEntry(makePageEntry(
+            file_id1,
+            512,
+            0,
+            0,
+            2048,
+            0x4567));
+        blob_store.blob_stats.restoreByEntry(makePageEntry(
+            file_id2,
+            512,
+            0,
+            0,
+            2048,
+            0x4567));
         blob_store.blob_stats.restore();
     }
 
@@ -193,14 +190,13 @@ try
         blob_store.registerPaths();
         for (const auto & id : blob_ids)
         {
-            blob_store.blob_stats.restoreByEntry(PageEntryV3{
-                .file_id = id,
-                .size = 1024,
-                .padded_size = 0,
-                .tag = 0,
-                .offset = 0,
-                .checksum = 0x4567,
-            });
+            blob_store.blob_stats.restoreByEntry(makePageEntry(
+                id,
+                1024,
+                0,
+                0,
+                0,
+                0x4567));
         }
     };
 
@@ -336,19 +332,19 @@ TEST_F(BlobStoreTest, testWriteRead)
     for (const auto & record : edit.getRecords())
     {
         ASSERT_EQ(record.type, EditRecordType::PUT);
-        ASSERT_EQ(record.entry.offset, index * buff_size);
-        ASSERT_EQ(record.entry.size, buff_size);
-        ASSERT_EQ(record.entry.file_id, 1);
+        ASSERT_EQ(record.entry->getOffset(), index * buff_size);
+        ASSERT_EQ(record.entry->getSize(), buff_size);
+        ASSERT_EQ(record.entry->getFileId(), 1);
 
         // Read directly from the file
         blob_store.read(buildV3Id(TEST_NAMESPACE_ID, page_id),
-                        record.entry.file_id,
-                        record.entry.offset,
+                        record.entry->getFileId(),
+                        record.entry->getOffset(),
                         c_buff_read + index * buff_size,
-                        record.entry.size,
+                        record.entry->getSize(),
                         /* ReadLimiterPtr */ nullptr);
 
-        ASSERT_EQ(strncmp(c_buff + index * buff_size, c_buff_read + index * buff_size, record.entry.size), 0);
+        ASSERT_EQ(strncmp(c_buff + index * buff_size, c_buff_read + index * buff_size, record.entry->getSize()), 0);
         index++;
     }
     ASSERT_EQ(index, buff_nums);
@@ -443,10 +439,10 @@ TEST_F(BlobStoreTest, testWriteReadWithIOLimiter)
             for (const auto & record : edits[i].getRecords())
             {
                 blob_store.read(buildV3Id(TEST_NAMESPACE_ID, page_id),
-                                record.entry.file_id,
-                                record.entry.offset,
+                                record.entry->getFileId(),
+                                record.entry->getOffset(),
                                 c_buff_read + i * buff_size,
-                                record.entry.size,
+                                record.entry->getSize(),
                                 read_limiter);
             }
         }
@@ -607,12 +603,12 @@ TEST_F(BlobStoreTest, testFeildOffsetWriteRead)
     for (const auto & record : edit.getRecords())
     {
         ASSERT_EQ(record.type, EditRecordType::PUT);
-        ASSERT_EQ(record.entry.offset, index * buff_size);
-        ASSERT_EQ(record.entry.size, buff_size);
-        ASSERT_EQ(record.entry.file_id, 1);
+        ASSERT_EQ(record.entry->getOffset(), index * buff_size);
+        ASSERT_EQ(record.entry->getSize(), buff_size);
+        ASSERT_EQ(record.entry->getFileId(), 1);
 
         PageFieldSizes check_field_sizes;
-        for (const auto & [field_offset, crc] : record.entry.field_offsets)
+        for (const auto & [field_offset, crc] : record.entry->getFieldOffsets())
         {
             check_field_sizes.emplace_back(field_offset);
             ASSERT_TRUE(crc);
@@ -622,13 +618,13 @@ TEST_F(BlobStoreTest, testFeildOffsetWriteRead)
 
         // Read
         blob_store.read(buildV3Id(TEST_NAMESPACE_ID, page_id),
-                        record.entry.file_id,
-                        record.entry.offset,
+                        record.entry->getFileId(),
+                        record.entry->getOffset(),
                         c_buff_read + index * buff_size,
-                        record.entry.size,
+                        record.entry->getSize(),
                         /* ReadLimiterPtr */ nullptr);
 
-        ASSERT_EQ(strncmp(c_buff + index * buff_size, c_buff_read + index * buff_size, record.entry.size), 0);
+        ASSERT_EQ(strncmp(c_buff + index * buff_size, c_buff_read + index * buff_size, record.entry->getSize()), 0);
         index++;
     }
     ASSERT_EQ(index, buff_nums);
@@ -667,16 +663,16 @@ try
 
         ASSERT_EQ(record.type, EditRecordType::PUT);
         ASSERT_EQ(record.page_id.low, page_id);
-        ASSERT_EQ(record.entry.offset, 0);
-        ASSERT_EQ(record.entry.size, buff_size);
-        ASSERT_EQ(record.entry.file_id, 1);
+        ASSERT_EQ(record.entry->getOffset(), 0);
+        ASSERT_EQ(record.entry->getSize(), buff_size);
+        ASSERT_EQ(record.entry->getFileId(), 1);
 
         record = records[1];
         ASSERT_EQ(record.type, EditRecordType::PUT);
         ASSERT_EQ(record.page_id.low, page_id);
-        ASSERT_EQ(record.entry.offset, buff_size);
-        ASSERT_EQ(record.entry.size, buff_size);
-        ASSERT_EQ(record.entry.file_id, 1);
+        ASSERT_EQ(record.entry->getOffset(), buff_size);
+        ASSERT_EQ(record.entry->getSize(), buff_size);
+        ASSERT_EQ(record.entry->getFileId(), 1);
     }
 
 
@@ -725,9 +721,9 @@ try
         auto record = records[0];
         ASSERT_EQ(record.type, EditRecordType::PUT);
         ASSERT_EQ(record.page_id.low, page_id);
-        ASSERT_EQ(record.entry.offset, buff_size * 2);
-        ASSERT_EQ(record.entry.size, buff_size);
-        ASSERT_EQ(record.entry.file_id, 1);
+        ASSERT_EQ(record.entry->getOffset(), buff_size * 2);
+        ASSERT_EQ(record.entry->getSize(), buff_size);
+        ASSERT_EQ(record.entry->getFileId(), 1);
 
         record = records[1];
         ASSERT_EQ(record.type, EditRecordType::REF);
@@ -791,9 +787,9 @@ TEST_F(BlobStoreTest, DISABLED_testWriteOutOfLimitSize)
         auto record = records[0];
         ASSERT_EQ(record.type, EditRecordType::PUT);
         ASSERT_EQ(record.page_id.low, 50);
-        ASSERT_EQ(record.entry.offset, 0);
-        ASSERT_EQ(record.entry.size, buf_size);
-        ASSERT_EQ(record.entry.file_id, 1);
+        ASSERT_EQ(record.entry->getOffset(), 0);
+        ASSERT_EQ(record.entry->getSize(), buf_size);
+        ASSERT_EQ(record.entry->getFileId(), 1);
 
         wb.clear();
         wb.putPage(51, /*tag*/ 0, buff2, buf_size);
@@ -804,9 +800,9 @@ TEST_F(BlobStoreTest, DISABLED_testWriteOutOfLimitSize)
         record = records[0];
         ASSERT_EQ(record.type, EditRecordType::PUT);
         ASSERT_EQ(record.page_id.low, 51);
-        ASSERT_EQ(record.entry.offset, 0);
-        ASSERT_EQ(record.entry.size, buf_size);
-        ASSERT_EQ(record.entry.file_id, 2);
+        ASSERT_EQ(record.entry->getOffset(), 0);
+        ASSERT_EQ(record.entry->getSize(), buf_size);
+        ASSERT_EQ(record.entry->getFileId(), 2);
     }
 }
 
@@ -871,7 +867,7 @@ TEST_F(BlobStoreTest, testBlobStoreGcStats)
     // After remove `entries_del1`.
     // Remain entries index [0, 2, 5, 6, 8]
     blob_store.remove(entries_del1);
-    ASSERT_EQ(entries_del1.begin()->file_id, 1);
+    ASSERT_EQ((*entries_del1.begin())->getFileId(), 1);
 
     auto stat = blob_store.blob_stats.blobIdToStat(1);
 
@@ -1013,9 +1009,9 @@ TEST_F(BlobStoreTest, GC)
     {
         ASSERT_EQ(record.page_id.low, page_id);
         auto it_entry = std::get<2>(*it);
-        ASSERT_EQ(record.entry.file_id, 2);
-        ASSERT_EQ(record.entry.checksum, it_entry.checksum);
-        ASSERT_EQ(record.entry.size, it_entry.size);
+        ASSERT_EQ(record.entry->getFileId(), 2);
+        ASSERT_EQ(record.entry->getCheckSum(), it_entry->getCheckSum());
+        ASSERT_EQ(record.entry->getSize(), it_entry->getSize());
         it++;
     }
 
@@ -1060,15 +1056,15 @@ try
 
         const auto & records = edit.getRecords();
         ASSERT_EQ(records.size(), 1);
-        if (gc_context.find(records[0].entry.file_id) == gc_context.end())
+        if (gc_context.find(records[0].entry->getFileId()) == gc_context.end())
         {
             PageDirectory<u128::PageDirectoryTrait>::GcEntries versioned_pageid_entries;
             versioned_pageid_entries.emplace_back(page_id, 1, records[0].entry);
-            gc_context[records[0].entry.file_id] = std::move(versioned_pageid_entries);
+            gc_context[records[0].entry->getFileId()] = std::move(versioned_pageid_entries);
         }
         else
         {
-            gc_context[records[0].entry.file_id].emplace_back(page_id, 1, records[0].entry);
+            gc_context[records[0].entry->getFileId()].emplace_back(page_id, 1, records[0].entry);
         }
 
         page_id++;
@@ -1150,9 +1146,9 @@ try
 
         const auto & records = edit.getRecords();
         ASSERT_EQ(records.size(), 1);
-        ASSERT_EQ(records[0].entry.file_id, 1);
-        ASSERT_EQ(records[0].entry.offset, 0);
-        ASSERT_EQ(records[0].entry.size, 200);
+        ASSERT_EQ(records[0].entry->getFileId(), 1);
+        ASSERT_EQ(records[0].entry->getOffset(), 0);
+        ASSERT_EQ(records[0].entry->getSize(), 200);
 
         const auto & stat = blob_store.blob_stats.blobIdToStat(1);
         ASSERT_TRUE(stat->isNormal());
@@ -1177,9 +1173,9 @@ try
 
         const auto & records = edit.getRecords();
         ASSERT_EQ(records.size(), 1);
-        ASSERT_EQ(records[0].entry.file_id, 2);
-        ASSERT_EQ(records[0].entry.offset, 0);
-        ASSERT_EQ(records[0].entry.size, 500);
+        ASSERT_EQ(records[0].entry->getFileId(), 2);
+        ASSERT_EQ(records[0].entry->getOffset(), 0);
+        ASSERT_EQ(records[0].entry->getSize(), 500);
 
         // verify blobstat
         const auto & stat = blob_store.blob_stats.blobIdToStat(2);
@@ -1209,9 +1205,9 @@ try
 
         const auto & records = edit.getRecords();
         ASSERT_EQ(records.size(), 1);
-        ASSERT_EQ(records[0].entry.file_id, 1);
-        ASSERT_EQ(records[0].entry.offset, 200);
-        ASSERT_EQ(records[0].entry.size, 100);
+        ASSERT_EQ(records[0].entry->getFileId(), 1);
+        ASSERT_EQ(records[0].entry->getOffset(), 200);
+        ASSERT_EQ(records[0].entry->getSize(), 100);
 
         const auto & stat = blob_store.blob_stats.blobIdToStat(1);
         ASSERT_TRUE(stat->isNormal());
@@ -1236,9 +1232,9 @@ try
 
         const auto & records = edit.getRecords();
         ASSERT_EQ(records.size(), 1);
-        ASSERT_EQ(records[0].entry.file_id, 3);
-        ASSERT_EQ(records[0].entry.offset, 0);
-        ASSERT_EQ(records[0].entry.size, 300);
+        ASSERT_EQ(records[0].entry->getFileId(), 3);
+        ASSERT_EQ(records[0].entry->getOffset(), 0);
+        ASSERT_EQ(records[0].entry->getSize(), 300);
 
         const auto & stat = blob_store.blob_stats.blobIdToStat(3);
         ASSERT_TRUE(stat->isNormal());
@@ -1270,25 +1266,25 @@ try
 
         // PUT page_id 54 into blob 4 range [0,600]
         ASSERT_EQ(records[0].page_id.low, 54);
-        ASSERT_EQ(records[0].entry.file_id, 4);
-        ASSERT_EQ(records[0].entry.offset, 0);
-        ASSERT_EQ(records[0].entry.size, 600);
+        ASSERT_EQ(records[0].entry->getFileId(), 4);
+        ASSERT_EQ(records[0].entry->getOffset(), 0);
+        ASSERT_EQ(records[0].entry->getSize(), 600);
 
         // PUT page_id 55 into blob 1 or 3
         ASSERT_EQ(records[1].page_id.low, 55);
-        ASSERT_TRUE(records[1].entry.file_id == 1 || records[1].entry.file_id == 3);
+        ASSERT_TRUE(records[1].entry->getFileId() == 1 || records[1].entry->getFileId() == 3);
 
         // PUT page_id 56 into blob 5 range [0,600]
         ASSERT_EQ(records[2].page_id.low, 56);
-        ASSERT_EQ(records[2].entry.file_id, 5);
-        ASSERT_EQ(records[2].entry.offset, 0);
-        ASSERT_EQ(records[2].entry.size, 500);
+        ASSERT_EQ(records[2].entry->getFileId(), 5);
+        ASSERT_EQ(records[2].entry->getOffset(), 0);
+        ASSERT_EQ(records[2].entry->getSize(), 500);
 
         // PUT page_id 57 into blob 6 range [0,200]
         ASSERT_EQ(records[3].page_id.low, 57);
-        ASSERT_EQ(records[3].entry.file_id, 6);
-        ASSERT_EQ(records[3].entry.offset, 0);
-        ASSERT_EQ(records[3].entry.size, 200);
+        ASSERT_EQ(records[3].entry->getFileId(), 6);
+        ASSERT_EQ(records[3].entry->getOffset(), 0);
+        ASSERT_EQ(records[3].entry->getSize(), 200);
     }
 }
 CATCH
@@ -1335,7 +1331,7 @@ try
     BlobConfig config_with_small_file_limit_size;
     config_with_small_file_limit_size.file_limit_size = 400;
 
-    PageEntryV3 entry_from_write;
+    PageEntryV3Ptr entry_from_write;
     {
         auto blob_store = BlobStore(getCurrentTestName(), file_provider, delegator, config_with_small_file_limit_size);
         size_t size_500 = 500;
@@ -1374,8 +1370,8 @@ try
     BlobConfig config_with_small_file_limit_size;
     config_with_small_file_limit_size.file_limit_size = 800;
 
-    PageEntryV3 entry_from_write1;
-    PageEntryV3 entry_from_write2;
+    PageEntryV3Ptr entry_from_write1;
+    PageEntryV3Ptr entry_from_write2;
     {
         auto blob_store = BlobStore(getCurrentTestName(), file_provider, delegator, config_with_small_file_limit_size);
         size_t size_500 = 500;
@@ -1393,8 +1389,8 @@ try
         ASSERT_EQ(records.size(), 2);
         entry_from_write1 = records[0].entry;
         entry_from_write2 = records[1].entry;
-        ASSERT_EQ(entry_from_write1.size, 500);
-        ASSERT_EQ(entry_from_write2.size, 200);
+        ASSERT_EQ(entry_from_write1->getSize(), 500);
+        ASSERT_EQ(entry_from_write2->getSize(), 200);
 
         ASSERT_TRUE(blob_store.blob_stats.blobIdToStat(1)->isNormal());
     }
@@ -1425,7 +1421,7 @@ try
         auto edit = blob_store.write(wb, nullptr);
         const auto & records = edit.getRecords();
         ASSERT_EQ(records.size(), 1);
-        ASSERT_EQ(records[0].entry.file_id, 2);
+        ASSERT_EQ(records[0].entry->getFileId(), 2);
         ASSERT_EQ(getTotalStatsNum(blob_store.blob_stats.getStats()), 2);
 
         // remove one shot blob file
@@ -1446,9 +1442,9 @@ try
     BlobConfig config_with_small_file_limit_size;
     config_with_small_file_limit_size.file_limit_size = 800;
 
-    PageEntryV3 entry_from_write1;
-    PageEntryV3 entry_from_write2;
-    PageEntryV3 entry_from_write3;
+    PageEntryV3Ptr entry_from_write1;
+    PageEntryV3Ptr entry_from_write2;
+    PageEntryV3Ptr entry_from_write3;
     auto blob_store = BlobStore(getCurrentTestName(), file_provider, delegator, config_with_small_file_limit_size);
     {
         size_t size_100 = 100;
@@ -1499,8 +1495,8 @@ try
         PageEntriesEdit gc_edit = blob_store.gc(gc_context, 500);
         const auto & records = gc_edit.getRecords();
         ASSERT_EQ(records.size(), 1);
-        ASSERT_EQ(records[0].entry.file_id, 2);
-        ASSERT_EQ(records[0].entry.size, 500);
+        ASSERT_EQ(records[0].entry->getFileId(), 2);
+        ASSERT_EQ(records[0].entry->getSize(), 500);
     }
 }
 CATCH

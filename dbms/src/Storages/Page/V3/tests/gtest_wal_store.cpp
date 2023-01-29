@@ -40,8 +40,8 @@ using u128::PageEntriesEdit;
 
 TEST(WALSeriTest, AllPuts)
 {
-    PageEntryV3 entry_p1{.file_id = 1, .size = 1, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
-    PageEntryV3 entry_p2{.file_id = 1, .size = 2, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
+    auto entry_p1 = makePageEntry(1, 1, 0, 0, 0x123, 0x4567);
+    auto entry_p2 = makePageEntry(1, 2, 0, 0, 0x123, 0x4567);
     PageVersion ver20(/*seq=*/20);
     PageEntriesEdit edit;
     edit.put(buildV3Id(TEST_NAMESPACE_ID, 1), entry_p1);
@@ -62,8 +62,8 @@ TEST(WALSeriTest, AllPuts)
 TEST(WALSeriTest, PutsAndRefsAndDels)
 try
 {
-    PageEntryV3 entry_p3{.file_id = 1, .size = 3, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
-    PageEntryV3 entry_p5{.file_id = 1, .size = 5, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
+    auto entry_p3 = makePageEntry(1, 3, 0, 0, 0x123, 0x4567);
+    auto entry_p5 = makePageEntry(1, 5, 0, 0, 0x123, 0x4567);
     PageVersion ver21(/*seq=*/21);
     PageEntriesEdit edit;
     edit.put(buildV3Id(TEST_NAMESPACE_ID, 3), entry_p3);
@@ -87,7 +87,7 @@ try
     EXPECT_EQ(iter->type, EditRecordType::REF);
     EXPECT_EQ(iter->page_id.low, 4);
     EXPECT_EQ(iter->version, ver21);
-    EXPECT_EQ(iter->entry.file_id, INVALID_BLOBFILE_ID);
+    EXPECT_EQ(iter->entry->getFileId(), INVALID_BLOBFILE_ID);
     iter++;
     EXPECT_EQ(iter->type, EditRecordType::PUT);
     EXPECT_EQ(iter->page_id.low, 5);
@@ -110,9 +110,9 @@ CATCH
 
 TEST(WALSeriTest, Upserts)
 {
-    PageEntryV3 entry_p1_2{.file_id = 2, .size = 1, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
-    PageEntryV3 entry_p3_2{.file_id = 2, .size = 3, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
-    PageEntryV3 entry_p5_2{.file_id = 2, .size = 5, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
+    auto entry_p1_2 = makePageEntry(2, 1, 0, 0, 0x123, 0x4567);
+    auto entry_p3_2 = makePageEntry(2, 3, 0, 0, 0x123, 0x4567);
+    auto entry_p5_2 = makePageEntry(2, 5, 0, 0, 0x123, 0x4567);
     PageVersion ver20_1(/*seq=*/20, /*epoch*/ 1);
     PageVersion ver21_1(/*seq=*/21, /*epoch*/ 1);
     PageEntriesEdit edit;
@@ -170,7 +170,7 @@ TEST(WALSeriTest, RefExternalAndEntry)
 
     {
         PageEntriesEdit edit;
-        PageEntryV3 entry_p1_2{.file_id = 2, .size = 1, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
+        auto entry_p1_2 = makePageEntry(2, 1, 0, 0, 0x123, 0x4567);
         edit.varEntry(buildV3Id(TEST_NAMESPACE_ID, 1), ver1_0, entry_p1_2, 2);
         edit.varDel(buildV3Id(TEST_NAMESPACE_ID, 1), ver2_0);
         edit.varRef(buildV3Id(TEST_NAMESPACE_ID, 2), ver3_0, buildV3Id(TEST_NAMESPACE_ID, 1));
@@ -422,7 +422,7 @@ try
     auto [wal, reader] = WALStore::create(getCurrentTestName(), provider, delegator, config);
     {
         size_t num_applied_edit = 0;
-        auto reader = WALStoreReader::create(getCurrentTestName(), provider, delegator);
+        //        auto reader = WALStoreReader::create(getCurrentTestName(), provider, delegator);
         for (; reader->remained(); reader->next())
         {
             num_applied_edit += 1;
@@ -433,8 +433,8 @@ try
     ASSERT_NE(wal, nullptr);
 
     // Stage 2. Apply with only puts
-    PageEntryV3 entry_p1{.file_id = 1, .size = 1, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
-    PageEntryV3 entry_p2{.file_id = 1, .size = 2, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
+    auto entry_p1 = makePageEntry(1, 1, 0, 0, 0x123, 0x4567);
+    auto entry_p2 = makePageEntry(1, 2, 0, 0, 0x123, 0x4567);
     PageVersion ver20(/*seq=*/20);
     {
         PageEntriesEdit edit;
@@ -464,8 +464,8 @@ try
     }
 
     // Stage 3. Apply with puts and refs
-    PageEntryV3 entry_p3{.file_id = 1, .size = 3, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
-    PageEntryV3 entry_p5{.file_id = 1, .size = 5, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
+    auto entry_p3 = makePageEntry(1, 3, 0, 0, 0x123, 0x4567);
+    auto entry_p5 = makePageEntry(1, 5, 0, 0, 0x123, 0x4567);
     PageVersion ver21(/*seq=*/21);
     {
         PageEntriesEdit edit;
@@ -498,9 +498,9 @@ try
 
 
     // Stage 4. Apply with delete and upsert
-    PageEntryV3 entry_p1_2{.file_id = 2, .size = 1, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
-    PageEntryV3 entry_p3_2{.file_id = 2, .size = 3, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
-    PageEntryV3 entry_p5_2{.file_id = 2, .size = 5, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
+    auto entry_p1_2 = makePageEntry(2, 1, 0, 0, 0x123, 0x4567);
+    auto entry_p3_2 = makePageEntry(2, 3, 0, 0, 0x123, 0x4567);
+    auto entry_p5_2 = makePageEntry(2, 5, 0, 0, 0x123, 0x4567);
     PageVersion ver20_1(/*seq=*/20, /*epoch*/ 1);
     PageVersion ver21_1(/*seq=*/21, /*epoch*/ 1);
     {
@@ -517,7 +517,7 @@ try
 
     {
         size_t num_applied_edit = 0;
-        auto reader = WALStoreReader::create(getCurrentTestName(), provider, delegator);
+        reader = WALStoreReader::create(getCurrentTestName(), provider, delegator);
         while (reader->remained())
         {
             const auto record = reader->next();
@@ -545,8 +545,8 @@ try
 
     std::vector<size_t> size_each_edit;
     // Stage 1. Apply with only puts
-    PageEntryV3 entry_p1{.file_id = 1, .size = 1, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
-    PageEntryV3 entry_p2{.file_id = 1, .size = 2, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
+    auto entry_p1 = makePageEntry(1, 1, 0, 0, 0x123, 0x4567);
+    auto entry_p2 = makePageEntry(1, 2, 0, 0, 0x123, 0x4567);
     PageVersion ver20(/*seq=*/20);
     {
         PageEntriesEdit edit;
@@ -557,8 +557,8 @@ try
     }
 
     // Stage 2. Apply with puts and refs
-    PageEntryV3 entry_p3{.file_id = 1, .size = 3, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
-    PageEntryV3 entry_p5{.file_id = 1, .size = 5, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
+    auto entry_p3 = makePageEntry(1, 3, 0, 0, 0x123, 0x4567);
+    auto entry_p5 = makePageEntry(1, 5, 0, 0, 0x123, 0x4567);
     PageVersion ver21(/*seq=*/21);
     {
         PageEntriesEdit edit;
@@ -571,9 +571,9 @@ try
     }
 
     // Stage 3. Apply with delete and upsert
-    PageEntryV3 entry_p1_2{.file_id = 2, .size = 1, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
-    PageEntryV3 entry_p3_2{.file_id = 2, .size = 3, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
-    PageEntryV3 entry_p5_2{.file_id = 2, .size = 5, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
+    auto entry_p1_2 = makePageEntry(2, 1, 0, 0, 0x123, 0x4567);
+    auto entry_p3_2 = makePageEntry(2, 3, 0, 0, 0x123, 0x4567);
+    auto entry_p5_2 = makePageEntry(2, 5, 0, 0, 0x123, 0x4567);
     PageVersion ver20_1(/*seq=*/20, /*epoch*/ 1);
     PageVersion ver21_1(/*seq=*/21, /*epoch*/ 1);
     {
@@ -589,7 +589,7 @@ try
 
     {
         size_t num_applied_edit = 0;
-        auto reader = WALStoreReader::create(getCurrentTestName(), provider, delegator);
+        reader = WALStoreReader::create(getCurrentTestName(), provider, delegator);
         while (reader->remained())
         {
             const auto record = reader->next();
@@ -648,13 +648,12 @@ try
     PageVersion ver(/*seq*/ 32);
     for (size_t i = 0; i < num_edits_test; ++i)
     {
-        PageEntryV3 entry{.file_id = 2, .size = 1, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
         PageEntriesEdit edit;
         const size_t num_pages_put = d_20(rd);
         for (size_t p = 0; p < num_pages_put; ++p)
         {
             page_id += 1;
-            entry.size = page_id;
+            auto entry = makePageEntry(2, /** size */ page_id, 0, 0, 0x123, 0x4567);
             edit.put(buildV3Id(TEST_NAMESPACE_ID, page_id), entry);
         }
         applyWithSameVersion(wal, edit, ver);
@@ -693,7 +692,7 @@ try
     WALStore::FilesSnapshot file_snap{.persisted_log_files = persisted_log_files};
 
     PageEntriesEdit snap_edit;
-    PageEntryV3 entry{.file_id = 2, .size = 1, .padded_size = 0, .tag = 0, .offset = 0x123, .checksum = 0x4567};
+    auto entry = makePageEntry(2, 1, 0, 0, 0x123, 0x4567);
     std::uniform_int_distribution<> d_10000(0, 10000);
     // just fill in some random entry
     for (size_t i = 0; i < 70; ++i)

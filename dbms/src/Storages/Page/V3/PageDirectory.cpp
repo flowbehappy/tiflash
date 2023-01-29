@@ -75,7 +75,7 @@ namespace PS::V3
  ********************************/
 
 template <typename Trait>
-void VersionedPageEntries<Trait>::createNewEntry(const PageVersion & ver, const PageEntryV3 & entry)
+void VersionedPageEntries<Trait>::createNewEntry(const PageVersion & ver, const PageEntryV3Ptr & entry)
 {
     auto page_lock = acquireLock();
     if (type == EditRecordType::VAR_DELETE)
@@ -121,13 +121,13 @@ void VersionedPageEntries<Trait>::createNewEntry(const PageVersion & ver, const 
         fmt::format("try to create entry version with invalid state "
                     "[ver={}] [entry={}] [state={}]",
                     ver,
-                    ::DB::PS::V3::toDebugString(entry),
+                    entry->toDebugString(),
                     toDebugString()),
         ErrorCodes::PS_DIR_APPLY_INVALID_STATUS);
 }
 
 template <typename Trait>
-typename VersionedPageEntries<Trait>::PageId VersionedPageEntries<Trait>::createUpsertEntry(const PageVersion & ver, const PageEntryV3 & entry)
+typename VersionedPageEntries<Trait>::PageId VersionedPageEntries<Trait>::createUpsertEntry(const PageVersion & ver, const PageEntryV3Ptr & entry)
 {
     auto page_lock = acquireLock();
 
@@ -199,7 +199,7 @@ typename VersionedPageEntries<Trait>::PageId VersionedPageEntries<Trait>::create
         fmt::format("try to create upsert entry version with invalid state "
                     "[ver={}] [entry={}] [state={}]",
                     ver,
-                    ::DB::PS::V3::toDebugString(entry),
+                    entry->toDebugString(),
                     toDebugString()),
         ErrorCodes::PS_DIR_APPLY_INVALID_STATUS);
 }
@@ -389,7 +389,7 @@ std::shared_ptr<typename VersionedPageEntries<Trait>::PageId> VersionedPageEntri
 
 template <typename Trait>
 std::tuple<ResolveResult, typename VersionedPageEntries<Trait>::PageId, PageVersion>
-VersionedPageEntries<Trait>::resolveToPageId(UInt64 seq, bool ignore_delete, PageEntryV3 * entry)
+VersionedPageEntries<Trait>::resolveToPageId(UInt64 seq, bool ignore_delete, PageEntryV3Ptr * entry)
 {
     auto page_lock = acquireLock();
     if (type == EditRecordType::VAR_ENTRY)
@@ -417,7 +417,7 @@ VersionedPageEntries<Trait>::resolveToPageId(UInt64 seq, bool ignore_delete, Pag
             {
                 // copy and return the entry
                 if (entry != nullptr)
-                    *entry = iter->second.entry;
+                    (*entry) = iter->second.entry;
                 return {ResolveResult::TO_NORMAL, Trait::PageIdTrait::getInvalidID(), PageVersion(0)};
             }
             // else fallthrough to FAIL
@@ -450,7 +450,7 @@ VersionedPageEntries<Trait>::resolveToPageId(UInt64 seq, bool ignore_delete, Pag
 }
 
 template <typename Trait>
-std::optional<PageEntryV3> VersionedPageEntries<Trait>::getEntry(UInt64 seq) const
+PageEntryV3Ptr VersionedPageEntries<Trait>::getEntry(UInt64 seq) const
 {
     auto page_lock = acquireLock();
     if (type == EditRecordType::VAR_ENTRY)
@@ -464,11 +464,11 @@ std::optional<PageEntryV3> VersionedPageEntries<Trait>::getEntry(UInt64 seq) con
                 return iter->second.entry;
         }
     }
-    return std::nullopt;
+    return {};
 }
 
 template <typename Trait>
-std::optional<PageEntryV3> VersionedPageEntries<Trait>::getLastEntry(std::optional<UInt64> seq) const
+PageEntryV3Ptr VersionedPageEntries<Trait>::getLastEntry(std::optional<UInt64> seq) const
 {
     auto page_lock = acquireLock();
     if (type == EditRecordType::VAR_ENTRY)
@@ -483,7 +483,7 @@ std::optional<PageEntryV3> VersionedPageEntries<Trait>::getLastEntry(std::option
             }
         }
     }
-    return std::nullopt;
+    return {};
 }
 
 // Returns true when **this id** is "visible" by `seq`.
@@ -601,10 +601,10 @@ PageSize VersionedPageEntries<Trait>::getEntriesByBlobIds(
     // The total entries size that will be moved
     PageSize entry_size_full_gc = 0;
     const auto & last_entry = iter->second;
-    if (blob_ids.count(last_entry.entry.file_id) > 0)
+    if (blob_ids.count(last_entry.entry->getFileId()) > 0)
     {
-        blob_versioned_entries[last_entry.entry.file_id].emplace_back(page_id, /* ver */ iter->first, last_entry.entry);
-        entry_size_full_gc += last_entry.entry.size;
+        blob_versioned_entries[last_entry.entry->getFileId()].emplace_back(page_id, /* ver */ iter->first, last_entry.entry);
+        entry_size_full_gc += last_entry.entry->getSize();
     }
     return entry_size_full_gc;
 }
@@ -918,7 +918,7 @@ SnapshotsStatistics PageDirectory<Trait>::getSnapshotsStat() const
 template <typename Trait>
 typename PageDirectory<Trait>::PageIdAndEntry PageDirectory<Trait>::getByIDImpl(const PageId & page_id, const PageDirectorySnapshotPtr & snap, bool throw_on_not_exist) const
 {
-    PageEntryV3 entry_got;
+    PageEntryV3Ptr entry_got = makeInvalidPageEntry();
 
     // After two write batches applied: [ver=1]{put 10}, [ver=2]{ref 11->10, del 10}, the `mvcc_table_directory` is:
     // {
@@ -970,7 +970,7 @@ typename PageDirectory<Trait>::PageIdAndEntry PageDirectory<Trait>::getByIDImpl(
                 }
                 else
                 {
-                    return PageIdAndEntry{page_id, PageEntryV3{.file_id = INVALID_BLOBFILE_ID}};
+                    return PageIDAndEntry{page_id, makeInvalidPageEntry()};
                 }
             }
         }
@@ -1003,7 +1003,7 @@ typename PageDirectory<Trait>::PageIdAndEntry PageDirectory<Trait>::getByIDImpl(
     }
     else
     {
-        return PageIdAndEntry{page_id, PageEntryV3{.file_id = INVALID_BLOBFILE_ID}};
+        return PageIDAndEntry{page_id, makeInvalidPageEntry()};
     }
 }
 
@@ -1011,7 +1011,7 @@ template <typename Trait>
 std::pair<typename PageDirectory<Trait>::PageIdAndEntries, typename PageDirectory<Trait>::PageIds>
 PageDirectory<Trait>::getByIDsImpl(const typename PageDirectory<Trait>::PageIds & page_ids, const PageDirectorySnapshotPtr & snap, bool throw_on_not_exist) const
 {
-    PageEntryV3 entry_got;
+    PageEntryV3Ptr entry_got{};
     PageIds page_not_found = {};
 
     const PageVersion init_ver_to_resolve(snap->sequence, 0);
@@ -1505,13 +1505,13 @@ PageDirectory<Trait>::getEntriesByBlobIds(const std::vector<BlobFileId> & blob_i
             continue;
         // the latest entry with version.seq <= ref_id.create_ver.seq
         auto entry = version_entries->getLastEntry(ver.sequence);
-        RUNTIME_CHECK_MSG(entry.has_value(), "ref_id={} ori_id={} ver={} entries={}", ref_id, ori_id, ver, version_entries->toDebugString());
+        RUNTIME_CHECK((bool)entry, ref_id, ori_id, ver, version_entries->toDebugString());
         // If the being-ref entry lays on the full gc candidate blobfiles, then we
         // need to rewrite the ref-id to a normal page.
-        if (blob_id_set.count(entry->file_id) > 0)
+        if (blob_id_set.count(entry->getFileId()) > 0)
         {
-            blob_versioned_entries[entry->file_id].emplace_back(ref_id, ver, *entry);
-            total_page_size += entry->size;
+            blob_versioned_entries[entry->getFileId()].emplace_back(ref_id, ver, entry);
+            total_page_size += entry->getSize();
             total_page_nums += 1;
             num_ref_id_rewrite += 1;
         }
@@ -1661,15 +1661,15 @@ typename PageDirectory<Trait>::PageEntries PageDirectory<Trait>::gcInMemEntries(
     // Iterate all page_id that need to decrease ref count of specified version.
     for (const auto & [page_id, deref_counter] : normal_entries_to_deref)
     {
-        typename MVCCMapType::iterator iter;
+        typename MVCCMapType::iterator deref_iter;
         {
             std::shared_lock read_lock(table_rw_mutex);
-            iter = mvcc_table_directory.find(page_id);
-            if (iter == mvcc_table_directory.end())
+            deref_iter = mvcc_table_directory.find(page_id);
+            if (deref_iter == mvcc_table_directory.end())
                 continue;
         }
 
-        const bool all_deleted = iter->second->derefAndClean(
+        const bool all_deleted = deref_iter->second->derefAndClean(
             lowest_seq,
             page_id,
             /*deref_ver=*/deref_counter.first,
@@ -1679,7 +1679,7 @@ typename PageDirectory<Trait>::PageEntries PageDirectory<Trait>::gcInMemEntries(
         if (all_deleted)
         {
             std::unique_lock write_lock(table_rw_mutex);
-            mvcc_table_directory.erase(iter);
+            mvcc_table_directory.erase(deref_iter);
             invalid_page_nums++;
             valid_page_nums--;
         }
