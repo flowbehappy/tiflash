@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <Storages/Page/V3/BoolAndUInt63.h>
+#include <Storages/Page/V3/PageDirectory.h>
 #include <Storages/Page/V3/PageEntry.h>
 #include <TestUtils/TiFlashTestBasic.h>
 #include <fmt/format.h>
 
 namespace DB::PS::V3::tests
 {
-TEST(PageEntry, TightOrLoose)
+TEST(PageTightOrLoose, Entry)
 {
     std::cout << "size of PageEntryV3Tight: " << sizeof(PageEntryV3Tight) << std::endl;
     std::cout << "size of PageEntryV3Loose: " << sizeof(PageEntryV3Loose) << std::endl;
@@ -47,4 +49,35 @@ TEST(PageEntry, TightOrLoose)
     ASSERT_TRUE(entry10->isTight());
     ASSERT_TRUE(!entry11->isTight());
 }
+
+TEST(PageTightOrLoose, VersionedPageEntries)
+{
+    std::cout << "size of VersionedPageEntries tight: " << sizeof(u128::VersionedPageEntries) << std::endl;
+    std::cout << "size of VersionedPageEntries loose: " << sizeof(u128::VersionedPageEntries) + sizeof(u128::VersionedPageEntries::ExtendedVars) << std::endl;
+    std::cout << "size of mutex: " << sizeof(std::mutex) << std::endl;
+    std::cout << "size of EditRecordType: " << sizeof(EditRecordType) << std::endl;
+    std::cout << "size of std::multimap<PageVersion, EntryOrDelete>: " << sizeof(std::multimap<PageVersion, EntryOrDelete>) << std::endl;
+    std::cout << "size of PageEntryV3Ptr: " << sizeof(PageEntryV3Ptr) << std::endl;
+    std::cout << "size of EntryOrDelete: " << sizeof(EntryOrDelete) << std::endl;
+}
+
+TEST(PageTightOrLoose, BoolAndUInt63)
+{
+    BoolAndUInt63 v1(false, 10000);
+    BoolAndUInt63 v2(true, 0x7FFFFFFFFFFFFFFFUL);
+    ASSERT_EQ(v1.getBool(), false);
+    ASSERT_EQ(v1.getUInt63(), 10000);
+    ASSERT_EQ(v2.getBool(), true);
+    ASSERT_EQ(v2.getUInt63(), 0x7FFFFFFFFFFFFFFFUL);
+
+    v1.setBool(true);
+    ASSERT_EQ(v1.getBool(), true);
+    v1.setBool(false);
+    ASSERT_EQ(v1.getBool(), false);
+    v1.setUInt63(100000000000);
+    ASSERT_EQ(v1.getUInt63(), 100000000000);
+    v1.setUInt63(0x7FFFFFFFFFFFFFFFUL);
+    ASSERT_EQ(v1.getUInt63(), 0x7FFFFFFFFFFFFFFFUL);
+}
+
 } // namespace DB::PS::V3::tests

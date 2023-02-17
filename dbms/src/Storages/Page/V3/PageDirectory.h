@@ -153,16 +153,40 @@ public:
     using GcEntries = std::vector<std::tuple<PageId, PageVersion, PageEntryV3Ptr>>;
     using GcEntriesMap = std::map<BlobFileId, GcEntries>;
 
-public:
-    VersionedPageEntries()
-        : type(EditRecordType::VAR_DELETE)
-        , is_deleted(false)
-        , create_ver(0)
-        , delete_ver(0)
-        , ori_page_id{}
-        , being_ref_count(1)
-    {}
+    VersionedPageEntries() = default;
 
+#ifndef DBMS_PUBLIC_GTEST
+private:
+#endif
+
+    // The extended variables. We don't make those vars as regular vars because they are
+    // relatively rarely used. And only create the struct when used helps to save memory.
+    struct ExtendedVars
+    {
+        // Has been deleted, valid when type == VAR_REF/VAR_EXTERNAL
+        bool is_deleted{false};
+        // The created version, valid when type == VAR_REF/VAR_EXTERNAL
+        PageVersion create_ver{0};
+        // The deleted version, valid when type == VAR_REF/VAR_EXTERNAL && is_deleted = true
+        PageVersion delete_ver{0};
+        // Original page id, valid when type == VAR_REF
+        PageId ori_page_id{};
+        // Being ref counter, valid when type == VAR_EXTERNAL
+        Int64 being_ref_count{1};
+        // A shared ptr to a holder, valid when type == VAR_EXTERNAL
+        std::shared_ptr<PageId> external_holder{};
+    };
+    using ExtendedVarsPtr = std::unique_ptr<ExtendedVars>;
+
+    // Make sure extended vars exists.
+    // You should only call this method when necessary. i.e. When you really need to use those vars.
+    void ensureExtendedVars() const
+    {
+        if (!extended_vars)
+            extended_vars = std::make_unique<ExtendedVars>();
+    }
+
+public:
     bool isExternalPage() const { return type == EditRecordType::VAR_EXTERNAL; }
 
     [[nodiscard]] PageLock acquireLock() const
@@ -248,17 +272,18 @@ public:
 
     String toDebugString() const
     {
+        ExtendedVars default_values;
         return fmt::format(
             "{{"
             "type:{}, create_ver: {}, is_deleted: {}, delete_ver: {}, "
             "ori_page_id: {}, being_ref_count: {}, num_entries: {}"
             "}}",
             magic_enum::enum_name(type),
-            create_ver,
-            is_deleted,
-            delete_ver,
-            ori_page_id,
-            being_ref_count,
+            extended_vars ? extended_vars->create_ver : default_values.create_ver,
+            extended_vars ? extended_vars->is_deleted : default_values.is_deleted,
+            extended_vars ? extended_vars->delete_ver : default_values.delete_ver,
+            extended_vars ? extended_vars->ori_page_id : default_values.ori_page_id,
+            extended_vars ? extended_vars->being_ref_count : default_values.being_ref_count,
             entries.size());
     }
     friend class PageStorageControlV3;
@@ -271,22 +296,12 @@ private:
     // - VAR_ENTRY
     // - VAR_REF
     // - VAR_EXTERNAL
-    EditRecordType type;
+    EditRecordType type{EditRecordType::VAR_DELETE};
 
-    // Has been deleted, valid when type == VAR_REF/VAR_EXTERNAL
-    bool is_deleted;
     // Entries sorted by version, valid when type == VAR_ENTRY
     std::multimap<PageVersion, EntryOrDelete> entries;
-    // The created version, valid when type == VAR_REF/VAR_EXTERNAL
-    PageVersion create_ver;
-    // The deleted version, valid when type == VAR_REF/VAR_EXTERNAL && is_deleted = true
-    PageVersion delete_ver;
-    // Original page id, valid when type == VAR_REF
-    PageId ori_page_id;
-    // Being ref counter, valid when type == VAR_EXTERNAL
-    Int64 being_ref_count;
-    // A shared ptr to a holder, valid when type == VAR_EXTERNAL
-    std::shared_ptr<PageId> external_holder;
+    // Store some extended vars only when required. Used to save memory.
+    mutable ExtendedVarsPtr extended_vars{};
 };
 
 // `PageDirectory` store multi-versions entries for the same

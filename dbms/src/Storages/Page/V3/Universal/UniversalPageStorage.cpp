@@ -113,7 +113,7 @@ UniversalPageMap UniversalPageStorage::read(const std::vector<PageReadFields> & 
     {
         const auto & [id, entry] = throw_on_not_exist ? page_directory->getByID(page_id, snapshot) : page_directory->getByIDOrNull(page_id, snapshot);
 
-        if (entry.isValid())
+        if (entry && entry->isValid())
         {
             auto info = PS::V3::universal::BlobStoreType::FieldReadInfo(page_id, entry, field_indices);
             read_infos.emplace_back(info);
@@ -171,12 +171,12 @@ DB::PageEntry UniversalPageStorage::getEntry(const UniversalPageId & page_id, Sn
         const auto & [id, entry] = page_directory->getByIDOrNull(page_id, snapshot);
         (void)id;
         PageEntry entry_ret;
-        entry_ret.file_id = entry.file_id;
-        entry_ret.offset = entry.offset;
-        entry_ret.tag = entry.tag;
-        entry_ret.size = entry.size;
-        entry_ret.field_offsets = entry.field_offsets;
-        entry_ret.checksum = entry.checksum;
+        entry_ret.file_id = entry->getFileId();
+        entry_ret.offset = entry->getOffset();
+        entry_ret.tag = entry->getTag();
+        entry_ret.size = entry->getSize();
+        entry_ret.field_offsets = entry->getFieldOffsets();
+        entry_ret.checksum = entry->getCheckSum();
 
         return entry_ret;
     }

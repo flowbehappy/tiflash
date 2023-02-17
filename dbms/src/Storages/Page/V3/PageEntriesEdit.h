@@ -170,7 +170,7 @@ public:
         records.emplace_back(record);
     }
 
-    void upsertPage(const PageId & page_id,, const PageVersion & ver, const PageEntryV3Ptr & entry)
+    void upsertPage(const PageId & page_id, const PageVersion & ver, const PageEntryV3Ptr & entry)
     {
         EditRecord record{};
         record.type = EditRecordType::UPSERT;
