@@ -22,6 +22,7 @@
 #include <Storages/Page/Page.h>
 #include <Storages/Page/Snapshot.h>
 #include <Storages/Page/V3/BlobStore.h>
+#include <Storages/Page/V3/BoolAndUInt63.h>
 #include <Storages/Page/V3/MapUtils.h>
 #include <Storages/Page/V3/PageDefines.h>
 #include <Storages/Page/V3/PageDirectory/ExternalIdsByNamespace.h>
@@ -81,56 +82,57 @@ private:
 };
 using PageDirectorySnapshotPtr = std::shared_ptr<PageDirectorySnapshot>;
 
-struct EntryOrDelete
+class EntryOrDelete
 {
-    bool is_delete = true;
-    Int64 being_ref_count = 1;
+private:
+    // Combine is_delete and being_ref_count into a UInt64, to save memory usage.
+    BoolAndUInt63 is_deleted_and_being_ref_count;
     PageEntryV3Ptr entry;
+
+    EntryOrDelete(bool is_delete_, Int64 being_ref_count_, const PageEntryV3Ptr & entry_)
+        : is_deleted_and_being_ref_count(is_delete_, being_ref_count_)
+        , entry(entry_)
+    {}
+
+public:
+    bool isDeleted() const { return is_deleted_and_being_ref_count.getBool(); }
+    void setDeleted(bool del) { is_deleted_and_being_ref_count.setBool(del); }
+    UInt64 beingRefCount() const { return is_deleted_and_being_ref_count.getUInt63(); }
+    void setBeingRefCount(UInt64 count) { is_deleted_and_being_ref_count.setUInt63(count); }
+    Int64 incrRefCount() { return is_deleted_and_being_ref_count.increaseUInt63(); }
+    UInt64 decrRefCount() { return is_deleted_and_being_ref_count.decreaseUInt63(); }
+    UInt64 decrRefCount(UInt64 dec) { return is_deleted_and_being_ref_count.decreaseUInt63(dec); }
+
+    bool isEntry() const { return !isDeleted(); }
+    const PageEntryV3Ptr & getEntry() const { return entry; }
 
     static EntryOrDelete newDelete()
     {
-        return EntryOrDelete{
-            .is_delete = true,
-            .being_ref_count = 1, // meaningless
-            .entry = {}, // meaningless
-        };
+        return EntryOrDelete(true, 1, {});
     }
+
     static EntryOrDelete newNormalEntry(const PageEntryV3Ptr & entry)
     {
-        return EntryOrDelete{
-            .is_delete = false,
-            .being_ref_count = 1,
-            .entry = entry,
-        };
+        return EntryOrDelete(false, 1, entry);
     }
+
     static EntryOrDelete newReplacingEntry(const EntryOrDelete & ori_entry, const PageEntryV3Ptr & entry)
     {
-        return EntryOrDelete{
-            .is_delete = false,
-            .being_ref_count = ori_entry.being_ref_count,
-            .entry = entry,
-        };
+        return EntryOrDelete(false, ori_entry.beingRefCount(), entry);
     }
 
     static EntryOrDelete newFromRestored(PageEntryV3Ptr entry, Int64 being_ref_count)
     {
-        return EntryOrDelete{
-            .is_delete = false,
-            .being_ref_count = being_ref_count,
-            .entry = entry,
-        };
+        return EntryOrDelete(false, being_ref_count, entry);
     }
-
-    bool isDelete() const { return is_delete; }
-    bool isEntry() const { return !is_delete; }
 
     String toDebugString() const
     {
         return fmt::format(
             "{{is_delete:{}, entry:{}, being_ref_count:{}}}",
-            is_delete,
+            isDeleted(),
             entry->toDebugString(),
-            being_ref_count);
+            beingRefCount());
     }
 };
 
@@ -163,18 +165,27 @@ private:
     // relatively rarely used. And only create the struct when used helps to save memory.
     struct ExtendedVars
     {
+        // Combine is_delete and being_ref_count into a UInt64, to save memory usage.
         // Has been deleted, valid when type == VAR_REF/VAR_EXTERNAL
-        bool is_deleted{false};
+        // Being ref counter, valid when type == VAR_EXTERNAL
+        BoolAndUInt63 is_deleted_and_being_ref_count{false, 1};
+
         // The created version, valid when type == VAR_REF/VAR_EXTERNAL
         PageVersion create_ver{0};
         // The deleted version, valid when type == VAR_REF/VAR_EXTERNAL && is_deleted = true
         PageVersion delete_ver{0};
         // Original page id, valid when type == VAR_REF
         PageId ori_page_id{};
-        // Being ref counter, valid when type == VAR_EXTERNAL
-        Int64 being_ref_count{1};
         // A shared ptr to a holder, valid when type == VAR_EXTERNAL
         std::shared_ptr<PageId> external_holder{};
+
+        bool isDeleted() const { return is_deleted_and_being_ref_count.getBool(); }
+        void setDeleted(bool del) { is_deleted_and_being_ref_count.setBool(del); }
+        UInt64 beingRefCount() const { return is_deleted_and_being_ref_count.getUInt63(); }
+        void setBeingRefCount(UInt64 count) { is_deleted_and_being_ref_count.setUInt63(count); }
+        Int64 incrRefCount() { return is_deleted_and_being_ref_count.increaseUInt63(); }
+        UInt64 decrRefCount() { return is_deleted_and_being_ref_count.decreaseUInt63(); }
+        UInt64 decrRefCount(UInt64 dec) { return is_deleted_and_being_ref_count.decreaseUInt63(dec); }
     };
     using ExtendedVarsPtr = std::unique_ptr<ExtendedVars>;
 
@@ -245,7 +256,7 @@ public:
      */
     [[nodiscard]] bool cleanOutdatedEntries(
         UInt64 lowest_seq,
-        std::map<PageId, std::pair<PageVersion, Int64>> * normal_entries_to_deref,
+        std::map<PageId, std::pair<PageVersion, UInt64>> * normal_entries_to_deref,
         PageEntriesV3 * entries_removed,
         const PageLock & page_lock);
     /**
@@ -259,7 +270,7 @@ public:
         UInt64 lowest_seq,
         const PageId & page_id,
         const PageVersion & deref_ver,
-        Int64 deref_count,
+        UInt64 deref_count,
         PageEntriesV3 * entries_removed);
 
     void collapseTo(UInt64 seq, const PageId & page_id, PageEntriesEdit & edit);
@@ -280,10 +291,10 @@ public:
             "}}",
             magic_enum::enum_name(type),
             extended_vars ? extended_vars->create_ver : default_values.create_ver,
-            extended_vars ? extended_vars->is_deleted : default_values.is_deleted,
+            extended_vars ? extended_vars->isDeleted() : default_values.isDeleted(),
             extended_vars ? extended_vars->delete_ver : default_values.delete_ver,
             extended_vars ? extended_vars->ori_page_id : default_values.ori_page_id,
-            extended_vars ? extended_vars->being_ref_count : default_values.being_ref_count,
+            extended_vars ? extended_vars->beingRefCount() : default_values.beingRefCount(),
             entries.size());
     }
     friend class PageStorageControlV3;

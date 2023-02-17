@@ -48,7 +48,7 @@ namespace PS::V3::tests
 class VersionedEntriesTest : public ::testing::Test
 {
 public:
-    using DerefCounter = std::map<PageIdV3Internal, std::pair<PageVersion, Int64>>;
+    using DerefCounter = std::map<PageIdV3Internal, std::pair<PageVersion, UInt64>>;
     std::tuple<bool, PageEntriesV3, DerefCounter> runClean(UInt64 seq)
     {
         DerefCounter deref_counter;
@@ -329,7 +329,7 @@ try
     entries.createDelete(PageVersion(16));
 
     bool all_removed;
-    std::map<PageIdV3Internal, std::pair<PageVersion, Int64>> deref_counter;
+    std::map<PageIdV3Internal, std::pair<PageVersion, UInt64>> deref_counter;
     PageEntriesV3 removed_entries;
 
     // <2,0> get removed.
@@ -354,7 +354,7 @@ TEST_F(VersionedEntriesTest, DontCleanWhenBeingRef)
 try
 {
     bool all_removed;
-    std::map<PageIdV3Internal, std::pair<PageVersion, Int64>> deref_counter;
+    std::map<PageIdV3Internal, std::pair<PageVersion, UInt64>> deref_counter;
     PageEntriesV3 removed_entries;
 
     INSERT_ENTRY(2);
@@ -392,7 +392,7 @@ TEST_F(VersionedEntriesTest, DontCleanWhenBeingRef2)
 try
 {
     bool all_removed;
-    std::map<PageIdV3Internal, std::pair<PageVersion, Int64>> deref_counter;
+    std::map<PageIdV3Internal, std::pair<PageVersion, UInt64>> deref_counter;
     PageEntriesV3 removed_entries;
 
     INSERT_ENTRY(2);
@@ -424,7 +424,7 @@ TEST_F(VersionedEntriesTest, CleanDuplicatedWhenBeingRefAndAppliedUpsert)
 try
 {
     bool all_removed;
-    std::map<PageIdV3Internal, std::pair<PageVersion, Int64>> deref_counter;
+    std::map<PageIdV3Internal, std::pair<PageVersion, UInt64>> deref_counter;
     PageEntriesV3 removed_entries;
 
     INSERT_ENTRY(2);
@@ -457,7 +457,7 @@ TEST_F(VersionedEntriesTest, CleanDuplicatedWhenBeingRefAndAppliedUpsert2)
 try
 {
     bool all_removed;
-    std::map<PageIdV3Internal, std::pair<PageVersion, Int64>> deref_counter;
+    std::map<PageIdV3Internal, std::pair<PageVersion, UInt64>> deref_counter;
     PageEntriesV3 removed_entries;
 
     INSERT_ENTRY(2);
@@ -493,7 +493,7 @@ TEST_F(VersionedEntriesTest, ReadAfterGcApplied)
 try
 {
     bool all_removed;
-    std::map<PageIdV3Internal, std::pair<PageVersion, Int64>> deref_counter;
+    std::map<PageIdV3Internal, std::pair<PageVersion, UInt64>> deref_counter;
     PageEntriesV3 removed_entries;
 
     INSERT_ENTRY(2);

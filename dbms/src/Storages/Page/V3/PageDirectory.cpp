@@ -93,7 +93,7 @@ void VersionedPageEntries<Trait>::createNewEntry(const PageVersion & ver, const 
         {
             entries.emplace(ver, EntryOrDelete::newNormalEntry(entry));
         }
-        else if (last_iter->second.isDelete())
+        else if (last_iter->second.isDeleted())
         {
             entries.emplace(ver, EntryOrDelete::newNormalEntry(entry));
         }
@@ -102,7 +102,7 @@ void VersionedPageEntries<Trait>::createNewEntry(const PageVersion & ver, const 
             assert(last_iter->second.isEntry());
             // It is ok to replace the entry with same sequence and newer epoch, but not valid
             // to replace the entry with newer sequence.
-            if (unlikely(last_iter->second.being_ref_count != 1 && last_iter->first.sequence < ver.sequence))
+            if (unlikely(last_iter->second.beingRefCount() != 1 && last_iter->first.sequence < ver.sequence))
             {
                 throw Exception(
                     fmt::format("Try to replace normal entry with an newer seq [ver={}] [prev_ver={}] [last_entry={}]",
@@ -140,7 +140,7 @@ typename VersionedPageEntries<Trait>::PageId VersionedPageEntries<Trait>::create
         {
             entries.emplace(ver, EntryOrDelete::newNormalEntry(entry));
         }
-        else if (last_iter->second.isDelete())
+        else if (last_iter->second.isDeleted())
         {
             // append after delete
             entries.emplace(ver, EntryOrDelete::newNormalEntry(entry));
@@ -150,7 +150,7 @@ typename VersionedPageEntries<Trait>::PageId VersionedPageEntries<Trait>::create
             assert(last_iter->second.isEntry());
             // It is ok to replace the entry with same sequence and newer epoch, but not valid
             // to replace the entry with newer sequence.
-            if (unlikely(last_iter->second.being_ref_count != 1 && last_iter->first.sequence < ver.sequence))
+            if (unlikely(last_iter->second.beingRefCount() != 1 && last_iter->first.sequence < ver.sequence))
             {
                 throw Exception(
                     fmt::format("Try to replace normal entry with an newer seq [ver={}] [prev_ver={}] [last_entry={}]",
@@ -169,12 +169,12 @@ typename VersionedPageEntries<Trait>::PageId VersionedPageEntries<Trait>::create
     {
         ensureExtendedVars();
         // an ref-page is rewritten into a normal page
-        if (!extended_vars->is_deleted)
+        if (!extended_vars->isDeleted())
         {
             // Full GC has rewritten new data on disk, we need to update this RefPage
             // to be a normal page with the upsert-entry.
             entries.emplace(ver, EntryOrDelete::newNormalEntry(entry));
-            extended_vars->is_deleted = false;
+            extended_vars->setDeleted(false);
             type = EditRecordType::VAR_ENTRY;
             // Also we need to decrease the ref-count of ori_page_id.
             return extended_vars->ori_page_id;
@@ -187,7 +187,7 @@ typename VersionedPageEntries<Trait>::PageId VersionedPageEntries<Trait>::create
             // remove the useless data on `entry`.
             entries.emplace(ver, EntryOrDelete::newNormalEntry(entry));
             entries.emplace(extended_vars->delete_ver, EntryOrDelete::newDelete());
-            extended_vars->is_deleted = false;
+            extended_vars->setDeleted(false);
             type = EditRecordType::VAR_ENTRY;
             // Though the ref-id is marked as deleted, but the ref-count of
             // ori_page_id is not decreased. Return the ori_page_id
@@ -217,10 +217,10 @@ std::shared_ptr<typename VersionedPageEntries<Trait>::PageId> VersionedPageEntri
     if (type == EditRecordType::VAR_DELETE)
     {
         type = EditRecordType::VAR_EXTERNAL;
-        extended_vars->is_deleted = false;
+        extended_vars->setDeleted(false);
         extended_vars->create_ver = ver;
         extended_vars->delete_ver = PageVersion(0);
-        extended_vars->being_ref_count = 1;
+        extended_vars->setBeingRefCount(1);
         // return the new created holder to caller to set the page_id
         extended_vars->external_holder = std::make_shared<typename Trait::PageId>();
         return extended_vars->external_holder;
@@ -228,15 +228,15 @@ std::shared_ptr<typename VersionedPageEntries<Trait>::PageId> VersionedPageEntri
 
     if (type == EditRecordType::VAR_EXTERNAL)
     {
-        if (extended_vars->is_deleted)
+        if (extended_vars->isDeleted())
         {
             // adding external after deleted should be ok
             if (extended_vars->delete_ver <= ver)
             {
-                extended_vars->is_deleted = false;
+                extended_vars->setDeleted(false);
                 extended_vars->create_ver = ver;
                 extended_vars->delete_ver = PageVersion(0);
-                extended_vars->being_ref_count = 1;
+                extended_vars->setBeingRefCount(1);
                 // return the new created holder to caller to set the page_id
                 extended_vars->external_holder = std::make_shared<typename Trait::PageId>();
                 return extended_vars->external_holder;
@@ -271,7 +271,7 @@ void VersionedPageEntries<Trait>::createDelete(const PageVersion & ver)
     if (type == EditRecordType::VAR_ENTRY)
     {
         // ignore if the last item is already "delete"
-        if (entries.empty() || !entries.rbegin()->second.isDelete())
+        if (entries.empty() || !entries.rbegin()->second.isDeleted())
         {
             entries.emplace(ver, EntryOrDelete::newDelete());
         }
@@ -281,7 +281,7 @@ void VersionedPageEntries<Trait>::createDelete(const PageVersion & ver)
     if (type == EditRecordType::VAR_EXTERNAL || type == EditRecordType::VAR_REF)
     {
         ensureExtendedVars();
-        extended_vars->is_deleted = true;
+        extended_vars->setDeleted(true);
         extended_vars->delete_ver = ver;
         return;
     }
@@ -310,7 +310,7 @@ bool VersionedPageEntries<Trait>::createNewRef(const PageVersion & ver, const Pa
     if (type == EditRecordType::VAR_DELETE)
     {
         type = EditRecordType::VAR_REF;
-        extended_vars->is_deleted = false;
+        extended_vars->setDeleted(false);
         extended_vars->ori_page_id = ori_page_id_;
         extended_vars->create_ver = ver;
         return true;
@@ -318,14 +318,14 @@ bool VersionedPageEntries<Trait>::createNewRef(const PageVersion & ver, const Pa
 
     if (type == EditRecordType::VAR_REF)
     {
-        if (extended_vars->is_deleted)
+        if (extended_vars->isDeleted())
         {
             // adding ref after deleted should be ok
             if (extended_vars->delete_ver <= ver)
             {
                 extended_vars->ori_page_id = ori_page_id_;
                 extended_vars->create_ver = ver;
-                extended_vars->is_deleted = false;
+                extended_vars->setDeleted(false);
                 extended_vars->delete_ver = PageVersion(0);
                 return true;
             }
@@ -367,7 +367,7 @@ std::shared_ptr<typename VersionedPageEntries<Trait>::PageId> VersionedPageEntri
     {
         type = EditRecordType::VAR_REF;
         ensureExtendedVars();
-        extended_vars->is_deleted = false;
+        extended_vars->setDeleted(false);
         extended_vars->create_ver = rec.version;
         extended_vars->ori_page_id = rec.ori_page_id;
         return nullptr;
@@ -376,9 +376,9 @@ std::shared_ptr<typename VersionedPageEntries<Trait>::PageId> VersionedPageEntri
     {
         type = EditRecordType::VAR_EXTERNAL;
         ensureExtendedVars();
-        extended_vars->is_deleted = false;
+        extended_vars->setDeleted(false);
         extended_vars->create_ver = rec.version;
-        extended_vars->being_ref_count = rec.being_ref_count;
+        extended_vars->setBeingRefCount(rec.being_ref_count);
         extended_vars->external_holder = std::make_shared<typename Trait::PageId>(rec.page_id);
         return extended_vars->external_holder;
     }
@@ -406,7 +406,7 @@ VersionedPageEntries<Trait>::resolveToPageId(UInt64 seq, bool ignore_delete, Pag
         if (auto iter = MapUtils::findLess(entries, PageVersion(seq + 1));
             iter != entries.end())
         {
-            if (!ignore_delete && iter->second.isDelete())
+            if (!ignore_delete && iter->second.isDeleted())
             {
                 // the page is not visible
                 return {ResolveResult::FAIL, Trait::PageIdTrait::getInvalidID(), PageVersion(0)};
@@ -416,7 +416,7 @@ VersionedPageEntries<Trait>::resolveToPageId(UInt64 seq, bool ignore_delete, Pag
             // Checkout the details in `PageDirectory::get`.
 
             // Ignore all "delete"
-            while (iter != entries.begin() && iter->second.isDelete())
+            while (iter != entries.begin() && iter->second.isDeleted())
             {
                 --iter;
             }
@@ -425,7 +425,7 @@ VersionedPageEntries<Trait>::resolveToPageId(UInt64 seq, bool ignore_delete, Pag
             {
                 // copy and return the entry
                 if (entry != nullptr)
-                    (*entry) = iter->second.entry;
+                    (*entry) = iter->second.getEntry();
                 return {ResolveResult::TO_NORMAL, Trait::PageIdTrait::getInvalidID(), PageVersion(0)};
             }
             // else fallthrough to FAIL
@@ -436,7 +436,7 @@ VersionedPageEntries<Trait>::resolveToPageId(UInt64 seq, bool ignore_delete, Pag
         ensureExtendedVars();
         // If `ignore_delete` is true, we need the origin page id even if it is logical deleted.
         // Checkout the details in `PageDirectory::getNormalPageId`.
-        bool ok = ignore_delete || (!extended_vars->is_deleted || seq < extended_vars->delete_ver.sequence);
+        bool ok = ignore_delete || (!extended_vars->isDeleted() || seq < extended_vars->delete_ver.sequence);
         if (extended_vars->create_ver.sequence <= seq && ok)
         {
             return {ResolveResult::TO_NORMAL, Trait::PageIdTrait::getInvalidID(), PageVersion(0)};
@@ -446,7 +446,7 @@ VersionedPageEntries<Trait>::resolveToPageId(UInt64 seq, bool ignore_delete, Pag
     {
         ensureExtendedVars();
         // Return the origin page id if this ref is visible by `seq`.
-        if (extended_vars->create_ver.sequence <= seq && (!extended_vars->is_deleted || seq < extended_vars->delete_ver.sequence))
+        if (extended_vars->create_ver.sequence <= seq && (!extended_vars->isDeleted() || seq < extended_vars->delete_ver.sequence))
         {
             return {ResolveResult::TO_REF, extended_vars->ori_page_id, extended_vars->create_ver};
         }
@@ -471,7 +471,7 @@ PageEntryV3Ptr VersionedPageEntries<Trait>::getEntry(UInt64 seq) const
         {
             // not deleted
             if (iter->second.isEntry())
-                return iter->second.entry;
+                return iter->second.getEntry();
         }
     }
     return {};
@@ -489,7 +489,7 @@ PageEntryV3Ptr VersionedPageEntries<Trait>::getLastEntry(std::optional<UInt64> s
                 continue;
             if (it_r->second.isEntry())
             {
-                return it_r->second.entry;
+                return it_r->second.getEntry();
             }
         }
     }
@@ -523,7 +523,7 @@ bool VersionedPageEntries<Trait>::isVisible(UInt64 seq) const
     {
         ensureExtendedVars();
         // `delete_ver` is only valid when `is_deleted == true`
-        return extended_vars->create_ver.sequence <= seq && !(extended_vars->is_deleted && extended_vars->delete_ver.sequence <= seq);
+        return extended_vars->create_ver.sequence <= seq && !(extended_vars->isDeleted() && extended_vars->delete_ver.sequence <= seq);
     }
 
     throw Exception(fmt::format(
@@ -545,7 +545,7 @@ Int64 VersionedPageEntries<Trait>::incrRefCount(const PageVersion & ver)
         {
             // ignore all "delete"
             bool met_delete = false;
-            while (iter != entries.begin() && iter->second.isDelete())
+            while (iter != entries.begin() && iter->second.isDeleted())
             {
                 met_delete = true;
                 --iter;
@@ -553,11 +553,11 @@ Int64 VersionedPageEntries<Trait>::incrRefCount(const PageVersion & ver)
             // Then `iter` point to an entry or the `entries.begin()`, return if entry found
             if (iter->second.isEntry())
             {
-                if (unlikely(met_delete && iter->second.being_ref_count == 1))
+                if (unlikely(met_delete && iter->second.beingRefCount() == 1))
                 {
                     throw Exception(fmt::format("Try to add ref to a completely deleted entry [entry={}] [ver={}]", iter->second.toDebugString(), ver), ErrorCodes::LOGICAL_ERROR);
                 }
-                return ++iter->second.being_ref_count;
+                return iter->second.incrRefCount();
             }
         } // fallthrough to FAIL
     }
@@ -567,7 +567,7 @@ Int64 VersionedPageEntries<Trait>::incrRefCount(const PageVersion & ver)
         if (extended_vars->create_ver <= ver)
         {
             // We may add reference to an external id even if it is logically deleted.
-            return ++extended_vars->being_ref_count;
+            return extended_vars->incrRefCount();
         }
     }
     throw Exception(fmt::format("The entry to be added ref count is not found [ver={}] [state={}]", ver, toDebugString()), ErrorCodes::LOGICAL_ERROR);
@@ -591,7 +591,7 @@ PageSize VersionedPageEntries<Trait>::getEntriesByBlobIds(
     {
         ensureExtendedVars();
         // If the ref-id is not deleted, we will check whether its origin_entry.file_id in blob_ids
-        if (!extended_vars->is_deleted)
+        if (!extended_vars->isDeleted())
         {
             ref_ids_maybe_rewrite[page_id] = {extended_vars->ori_page_id, extended_vars->create_ver};
         }
@@ -606,7 +606,7 @@ PageSize VersionedPageEntries<Trait>::getEntriesByBlobIds(
     if (entries.empty())
         return 0;
     auto iter = entries.rbegin();
-    if (iter->second.isDelete())
+    if (iter->second.isDeleted())
         return 0;
 
     // If `entry.file_id in blob_ids` we will rewrite this non-deleted page to a new location
@@ -614,10 +614,10 @@ PageSize VersionedPageEntries<Trait>::getEntriesByBlobIds(
     // The total entries size that will be moved
     PageSize entry_size_full_gc = 0;
     const auto & last_entry = iter->second;
-    if (blob_ids.count(last_entry.entry->getFileId()) > 0)
+    if (blob_ids.count(last_entry.getEntry()->getFileId()) > 0)
     {
-        blob_versioned_entries[last_entry.entry->getFileId()].emplace_back(page_id, /* ver */ iter->first, last_entry.entry);
-        entry_size_full_gc += last_entry.entry->getSize();
+        blob_versioned_entries[last_entry.getEntry()->getFileId()].emplace_back(page_id, /* ver */ iter->first, last_entry.getEntry());
+        entry_size_full_gc += last_entry.getEntry()->getSize();
     }
     return entry_size_full_gc;
 }
@@ -625,20 +625,20 @@ PageSize VersionedPageEntries<Trait>::getEntriesByBlobIds(
 template <typename Trait>
 bool VersionedPageEntries<Trait>::cleanOutdatedEntries(
     UInt64 lowest_seq,
-    std::map<PageId, std::pair<PageVersion, Int64>> * normal_entries_to_deref,
+    std::map<PageId, std::pair<PageVersion, UInt64>> * normal_entries_to_deref,
     PageEntriesV3 * entries_removed,
     const PageLock & /*page_lock*/)
 {
     if (type == EditRecordType::VAR_EXTERNAL)
     {
         ensureExtendedVars();
-        return (extended_vars->being_ref_count == 1 && extended_vars->is_deleted && extended_vars->delete_ver.sequence <= lowest_seq);
+        return (extended_vars->beingRefCount() == 1 && extended_vars->isDeleted() && extended_vars->delete_ver.sequence <= lowest_seq);
     }
     else if (type == EditRecordType::VAR_REF)
     {
         ensureExtendedVars();
         // still visible by `lowest_seq`
-        if (!extended_vars->is_deleted || lowest_seq < extended_vars->delete_ver.sequence)
+        if (!extended_vars->isDeleted() || lowest_seq < extended_vars->delete_ver.sequence)
             return false;
         // Else this ref page is safe to be deleted.
         if (normal_entries_to_deref != nullptr)
@@ -656,7 +656,7 @@ bool VersionedPageEntries<Trait>::cleanOutdatedEntries(
     {
         return true;
     }
-    else if (type != EditRecordType::VAR_ENTRY)
+    else if unlikely (type != EditRecordType::VAR_ENTRY)
     {
         throw Exception(fmt::format("Invalid state {}", toDebugString()), ErrorCodes::LOGICAL_ERROR);
     }
@@ -685,7 +685,7 @@ bool VersionedPageEntries<Trait>::cleanOutdatedEntries(
     --iter; // keep the first version less than <lowest_seq+1, 0>
     while (true)
     {
-        if (iter->second.isDelete())
+        if (iter->second.isDeleted())
         {
             // a useless version, simply drop it
             iter = entries.erase(iter);
@@ -694,11 +694,11 @@ bool VersionedPageEntries<Trait>::cleanOutdatedEntries(
         {
             if (last_entry_is_delete)
             {
-                if (iter->second.being_ref_count == 1)
+                if (iter->second.beingRefCount() == 1)
                 {
                     if (entries_removed)
                     {
-                        entries_removed->emplace_back(iter->second.entry);
+                        entries_removed->emplace_back(iter->second.getEntry());
                     }
                     iter = entries.erase(iter);
                 }
@@ -711,7 +711,7 @@ bool VersionedPageEntries<Trait>::cleanOutdatedEntries(
                 // else there are newer "entry" in the version list, the outdated entries should be removed
                 if (entries_removed)
                 {
-                    entries_removed->emplace_back(iter->second.entry);
+                    entries_removed->emplace_back(iter->second.getEntry());
                 }
                 iter = entries.erase(iter);
             }
@@ -722,7 +722,7 @@ bool VersionedPageEntries<Trait>::cleanOutdatedEntries(
         --iter;
     }
 
-    return entries.empty() || (entries.size() == 1 && entries.begin()->second.isDelete());
+    return entries.empty() || (entries.size() == 1 && entries.begin()->second.isDeleted());
 }
 
 template <typename Trait>
@@ -730,46 +730,46 @@ bool VersionedPageEntries<Trait>::derefAndClean(
     UInt64 lowest_seq,
     const typename Trait::PageId & page_id,
     const PageVersion & deref_ver,
-    const Int64 deref_count,
+    const UInt64 deref_count,
     PageEntriesV3 * entries_removed)
 {
     auto page_lock = acquireLock();
     if (type == EditRecordType::VAR_EXTERNAL)
     {
         ensureExtendedVars();
-        if (extended_vars->being_ref_count <= deref_count)
+        if unlikely (extended_vars->beingRefCount() <= deref_count)
         {
             throw Exception(fmt::format("Decreasing ref count error [page_id={}] [ver={}] [deref_count={}]", page_id, deref_ver, deref_count));
         }
-        extended_vars->being_ref_count -= deref_count;
-        return (extended_vars->is_deleted && extended_vars->delete_ver.sequence <= lowest_seq && extended_vars->being_ref_count == 1);
+        extended_vars->decrRefCount(deref_count);
+        return (extended_vars->isDeleted() && extended_vars->delete_ver.sequence <= lowest_seq && extended_vars->beingRefCount() == 1);
     }
     else if (type == EditRecordType::VAR_ENTRY)
     {
         // Decrease the ref-counter. The entry may be moved to a newer entry with same sequence but higher epoch,
         // so we need to find the one less than <seq+1, 0> and decrease the ref-counter of it.
         auto iter = MapUtils::findMutLess(entries, PageVersion(deref_ver.sequence + 1, 0));
-        if (iter == entries.end())
+        if unlikely (iter == entries.end())
         {
             throw Exception(fmt::format("Can not find entry for decreasing ref count [page_id={}] [ver={}] [deref_count={}]", page_id, deref_ver, deref_count));
         }
         // ignore all "delete"
-        while (iter != entries.begin() && iter->second.isDelete())
+        while (iter != entries.begin() && iter->second.isDeleted())
         {
             --iter; // move to the previous entry
         }
         // Then `iter` point to an entry or the `entries.begin()`
-        if (iter->second.isDelete())
+        if unlikely (iter->second.isDeleted())
         {
             // run into the begin of `entries`, but still can not find a valid entry to decrease the ref-count
             throw Exception(fmt::format("Can not find entry for decreasing ref count till the begin [page_id={}] [ver={}] [deref_count={}]", page_id, deref_ver, deref_count));
         }
         assert(iter->second.isEntry());
-        if (iter->second.being_ref_count <= deref_count)
+        if unlikely (iter->second.beingRefCount() <= deref_count)
         {
             throw Exception(fmt::format("Decreasing ref count error [page_id={}] [ver={}] [deref_count={}] [entry={}]", page_id, deref_ver, deref_count, iter->second.toDebugString()));
         }
-        iter->second.being_ref_count -= deref_count;
+        iter->second.decrRefCount(deref_count);
 
         if (lowest_seq == 0)
             return false;
@@ -794,7 +794,7 @@ void VersionedPageEntries<Trait>::collapseTo(const UInt64 seq, const PageId & pa
         // or the being-ref entry/external won't be able to be clean
         // after restore.
         edit.varRef(page_id, extended_vars->create_ver, extended_vars->ori_page_id);
-        if (extended_vars->is_deleted && extended_vars->delete_ver.sequence <= seq)
+        if (extended_vars->isDeleted() && extended_vars->delete_ver.sequence <= seq)
         {
             edit.varDel(page_id, extended_vars->delete_ver);
         }
@@ -806,8 +806,8 @@ void VersionedPageEntries<Trait>::collapseTo(const UInt64 seq, const PageId & pa
         ensureExtendedVars();
         if (extended_vars->create_ver.sequence > seq)
             return;
-        edit.varExternal(page_id, extended_vars->create_ver, extended_vars->being_ref_count);
-        if (extended_vars->is_deleted && extended_vars->delete_ver.sequence <= seq)
+        edit.varExternal(page_id, extended_vars->create_ver, extended_vars->beingRefCount());
+        if (extended_vars->isDeleted() && extended_vars->delete_ver.sequence <= seq)
         {
             edit.varDel(page_id, extended_vars->delete_ver);
         }
@@ -824,10 +824,10 @@ void VersionedPageEntries<Trait>::collapseTo(const UInt64 seq, const PageId & pa
         if (last_iter->second.isEntry())
         {
             const auto & entry = last_iter->second;
-            edit.varEntry(page_id, /*ver*/ last_iter->first, entry.entry, entry.being_ref_count);
+            edit.varEntry(page_id, /*ver*/ last_iter->first, entry.getEntry(), entry.beingRefCount());
             return;
         }
-        else if (last_iter->second.isDelete())
+        else if (last_iter->second.isDeleted())
         {
             if (last_iter == entries.begin())
             {
@@ -845,7 +845,7 @@ void VersionedPageEntries<Trait>::collapseTo(const UInt64 seq, const PageId & pa
                 if (prev_iter->second.isEntry())
                 {
                     const auto & entry = prev_iter->second;
-                    edit.varEntry(page_id, prev_iter->first, entry.entry, entry.being_ref_count);
+                    edit.varEntry(page_id, prev_iter->first, entry.getEntry(), entry.beingRefCount());
                     edit.varDel(page_id, last_version);
                     break;
                 }
@@ -1644,7 +1644,7 @@ typename PageDirectory<Trait>::PageEntries PageDirectory<Trait>::gcInMemEntries(
 
     // The page_id that we need to decrease ref count
     // { id_0: <version, num to decrease>, id_1: <...>, ... }
-    std::map<PageId, std::pair<PageVersion, Int64>> normal_entries_to_deref;
+    std::map<PageId, std::pair<PageVersion, UInt64>> normal_entries_to_deref;
     // Iterate all page_id and try to clean up useless var entries
     while (true)
     {

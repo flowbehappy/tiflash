@@ -72,12 +72,39 @@ TEST(PageTightOrLoose, BoolAndUInt63)
 
     v1.setBool(true);
     ASSERT_EQ(v1.getBool(), true);
+    ASSERT_EQ(v1.getUInt63(), 10000);
+
     v1.setBool(false);
     ASSERT_EQ(v1.getBool(), false);
+    ASSERT_EQ(v1.getUInt63(), 10000);
+
     v1.setUInt63(100000000000);
+    ASSERT_EQ(v1.getBool(), false);
     ASSERT_EQ(v1.getUInt63(), 100000000000);
+
     v1.setUInt63(0x7FFFFFFFFFFFFFFFUL);
+    ASSERT_EQ(v1.getBool(), false);
     ASSERT_EQ(v1.getUInt63(), 0x7FFFFFFFFFFFFFFFUL);
+
+    v1.setUInt63(10000);
+    ASSERT_EQ(v1.getBool(), false);
+    ASSERT_EQ(v1.getUInt63(), 10000);
+
+    v1.increaseUInt63();
+    ASSERT_EQ(v1.getBool(), false);
+    ASSERT_EQ(v1.getUInt63(), 10001);
+
+    v1.increaseUInt63(11);
+    ASSERT_EQ(v1.getBool(), false);
+    ASSERT_EQ(v1.getUInt63(), 10012);
+
+    v1.decreaseUInt63();
+    ASSERT_EQ(v1.getBool(), false);
+    ASSERT_EQ(v1.getUInt63(), 10011);
+
+    v1.decreaseUInt63(11);
+    ASSERT_EQ(v1.getBool(), false);
+    ASSERT_EQ(v1.getUInt63(), 10000);
 }
 
 } // namespace DB::PS::V3::tests
