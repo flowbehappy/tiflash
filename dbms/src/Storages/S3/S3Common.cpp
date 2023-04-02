@@ -114,7 +114,7 @@ public:
 
     Aws::Utils::Logging::LogLevel GetLogLevel() const final
     {
-        return Aws::Utils::Logging::LogLevel::Info;
+        return Aws::Utils::Logging::LogLevel::Trace;
     }
 
     void Log(Aws::Utils::Logging::LogLevel log_level, const char * tag, const char * format_str, ...) final // NOLINT
