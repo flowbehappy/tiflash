@@ -30,10 +30,17 @@
 #include <Storages/DeltaMerge/workload/Utils.h>
 #include <Storages/Page/PageConstants.h>
 #include <Storages/PathPool.h>
+#include <Storages/S3/Credentials.h>
 #include <Storages/S3/S3Common.h>
 #include <Storages/Transaction/KVStore.h>
 #include <Storages/Transaction/TMTContext.h>
 #include <TestUtils/TiFlashTestEnv.h>
+#include <aws/core/Aws.h>
+#include <aws/s3/model/PutObjectRequest.h>
+#include <aws/sts/STSClient.h>
+#include <aws/sts/STSServiceClientModel.h>
+#include <aws/sts/model/GetCallerIdentityRequest.h>
+#include <aws/sts/model/GetCallerIdentityResult.h>
 #include <common/logger_useful.h>
 #include <cpptoml.h>
 #include <signal.h>
@@ -465,7 +472,29 @@ std::shared_ptr<S3::TiFlashS3Client> getS3Client(const WorkloadOptions & opts)
     }
 }
 
-void putRandomObject(const DB::DM::tests::WorkloadOptions & opts)
+static bool doUploadFile(const DB::DM::tests::WorkloadOptions & opts, const std::shared_ptr<Aws::S3::S3Client> & client, const String & local_fname, const String & remote_fname)
+{
+    Stopwatch sw;
+    Aws::S3::Model::PutObjectRequest req;
+    req.WithBucket(opts.s3_bucket).WithKey(opts.s3_root + "/" + remote_fname);
+
+    req.SetContentType("binary/octet-stream");
+    auto istr = Aws::MakeShared<Aws::FStream>("PutObjectInputStream", local_fname, std::ios_base::in | std::ios_base::binary);
+    RUNTIME_CHECK_MSG(istr->is_open(), "Open {} fail: {}", local_fname, strerror(errno));
+    auto write_bytes = std::filesystem::file_size(local_fname);
+    req.SetBody(istr);
+    auto result = client->PutObject(req);
+    if (!result.IsSuccess())
+    {
+        std::cout << fmt::format("S3 PutObject failed: {}, local_fname={} bucket={} root={} key={}", result.GetError().GetMessage(), local_fname, opts.s3_bucket, opts.s3_root, remote_fname);
+        return false;
+    }
+    auto elapsed_seconds = sw.elapsedSeconds();
+    std::cout << fmt::format("uploadFile local_fname={}, key={}, write_bytes={} cost={:.3f}s", local_fname, remote_fname, write_bytes, elapsed_seconds);
+    return true;
+}
+
+void putRandomObject(const DB::DM::tests::WorkloadOptions & opts, const std::shared_ptr<Aws::S3::S3Client> & s3client)
 {
     static thread_local String tid = getThreadId();
     static thread_local UInt64 index = 0;
@@ -474,11 +503,10 @@ void putRandomObject(const DB::DM::tests::WorkloadOptions & opts)
     auto remote_fname = fmt::format("{}/{}", tid, index++);
     auto local_fname = fmt::format("{}/{}", opts.s3_temp_dir, remote_fname);
     auto fsize = gen->get64();
-    char value = gen->get64() % 256;
+    char value = 1;
     genFile(local_fname, fsize, value);
-    auto client = getS3Client(opts);
     Stopwatch sw;
-    S3::uploadFile(*client, local_fname, remote_fname);
+    doUploadFile(opts, s3client, local_fname, remote_fname);
     addRemoteFname(remote_fname, fsize);
     s3_stat.addPutStat(remote_fname, sw.elapsedSeconds());
     std::filesystem::remove(local_fname);
@@ -500,14 +528,14 @@ void getRandomObject(const DB::DM::tests::WorkloadOptions & opts)
     std::filesystem::remove(local_fname);
 }
 
-void putRandomObjectLoop(const WorkloadOptions & opts)
-{
-    createThreadDirectoryIfNotExists(opts);
-    for (UInt64 i = 0; i < opts.s3_put_count_per_thread; ++i)
-    {
-        putRandomObject(opts);
-    }
-}
+//void putRandomObjectLoop(const WorkloadOptions & opts)
+//{
+//    createThreadDirectoryIfNotExists(opts);
+//    for (UInt64 i = 0; i < opts.s3_put_count_per_thread; ++i)
+//    {
+//        putRandomObject(opts);
+//    }
+//}
 
 void getRandomObjectLoop(const WorkloadOptions & opts)
 {
@@ -523,7 +551,7 @@ String S3_REGION;
 void benchS3(WorkloadOptions & opts)
 {
     //Poco::Environment::set("AWS_EC2_METADATA_DISABLED", "true"); // disable to speedup testing
-    TiFlashTestEnv::setupLogger(opts.log_level );
+    TiFlashTestEnv::setupLogger(opts.log_level);
 
     RUNTIME_CHECK(!opts.s3_bucket.empty());
     RUNTIME_CHECK(!opts.s3_endpoint.empty());
@@ -552,64 +580,107 @@ void benchS3(WorkloadOptions & opts)
         .root = opts.s3_root,
     };
     std::cout << fmt::format("StorageS3Config: {}", config.toString()) << std::endl;
-    DB::S3::ClientFactory::instance().init(config);
+    //    DB::S3::ClientFactory::instance().init(config);
 
-    // Threads for GetObject
-    S3FileCachePool::initialize(
-        /*max_threads*/ opts.s3_get_concurrency,
-        /*max_free_threads*/ opts.s3_get_concurrency,
-        /*queue_size*/ opts.s3_get_concurrency * 2);
+    Aws::Client::ClientConfiguration cfg("", true);
+    std::cout << fmt::format("Create ClientConfiguration end");
 
-    // Threads For PutObject
-    DataStoreS3Pool::initialize(
-        /*max_threads*/ opts.s3_put_concurrency,
-        /*max_free_threads*/ opts.s3_put_concurrency,
-        /*queue_size*/ opts.s3_put_concurrency * 2);
+    {
+        Aws::Client::ClientConfiguration sts_cfg("", true);
+        sts_cfg.verifySSL = false;
+        sts_cfg.region = S3_REGION;
+        sts_cfg.httpRequestTimeoutMs = config.request_timeout_ms;
+        Aws::STS::STSClient sts_client(sts_cfg);
+        Aws::STS::Model::GetCallerIdentityRequest req;
+        std::cout << ("GetCallerIdentity start");
+        auto get_identity_outcome = sts_client.GetCallerIdentity(req);
+        if (!get_identity_outcome.IsSuccess())
+        {
+            const auto & error = get_identity_outcome.GetError();
+            std::cout << fmt::format("get CallerIdentity failed, exception={} message={}", error.GetExceptionName(), error.GetMessage());
+        }
+        else
+        {
+            const auto & result = get_identity_outcome.GetResult();
+            std::cout << fmt::format("CallerIdentity{{UserId:{}, Account:{}, Arn:{}}}", result.GetUserId(), result.GetAccount(), result.GetArn());
+        }
+        std::cout << ("GetCallerIdentity end");
+    }
+
+
+    //    cfg.maxConnections = config_.max_connections;
+    //    cfg.requestTimeoutMs = config_.request_timeout_ms;
+    //    cfg.connectTimeoutMs = config_.connection_timeout_ms;
+    cfg.httpRequestTimeoutMs = 10000;
+    cfg.region = S3_REGION;
+    cfg.endpointOverride = config.endpoint;
+    cfg.scheme = Aws::Http::Scheme::HTTP;
+    cfg.verifySSL = false;
+
+    std::cout << fmt::format("Create S3Client start");
+    auto provider = std::make_shared<DB::S3::S3CredentialsProviderChain>();
+    auto s3client = std::make_shared<Aws::S3::S3Client>(provider, std::make_shared<Aws::S3::S3EndpointProvider>(), cfg);
+    std::cout << fmt::format("Create S3Client end");
+
+    //    // Threads for GetObject
+    //    S3FileCachePool::initialize(
+    //        /*max_threads*/ opts.s3_get_concurrency,
+    //        /*max_free_threads*/ opts.s3_get_concurrency,
+    //        /*queue_size*/ opts.s3_get_concurrency * 2);
+    //
+    //    // Threads For PutObject
+    //    DataStoreS3Pool::initialize(
+    //        /*max_threads*/ opts.s3_put_concurrency,
+    //        /*max_free_threads*/ opts.s3_put_concurrency,
+    //        /*queue_size*/ opts.s3_put_concurrency * 2);
 
     // make remote_fnames not empty.
     createThreadDirectoryIfNotExists(opts);
-    putRandomObjectLoop(opts);
+    putRandomObject(opts, s3client);
 
-    std::vector<std::future<void>> put_results;
-    for (UInt64 i = 0; i < opts.s3_put_concurrency; ++i)
-    {
-        auto task = std::make_shared<std::packaged_task<void()>>(
-            [&]() {
-                putRandomObjectLoop(opts);
-            });
-        put_results.push_back(task->get_future());
-        DataStoreS3Pool::get().scheduleOrThrowOnError([task]() { (*task)(); });
-    }
-
-    std::vector<std::future<void>> get_results;
-    for (UInt64 i = 0; i < opts.s3_get_concurrency; ++i)
-    {
-        auto task = std::make_shared<std::packaged_task<void()>>(
-            [&]() {
-                getRandomObjectLoop(opts);
-            });
-        get_results.push_back(task->get_future());
-        S3FileCachePool::get().scheduleOrThrowOnError([task]() { (*task)(); });
-    }
-    for (auto & f : put_results)
-    {
-        f.get();
-    }
-
-    for (auto & f : get_results)
-    {
-        f.get();
-    }
-
-    {
-        auto [key, seconds] = s3_stat.getMaxPutStat();
-        std::cout << fmt::format("max put time: {} => {}", key, seconds) << std::endl;
-    }
-    {
-        auto [key, seconds] = s3_stat.getMaxGetStat();
-        std::cout << fmt::format("max get time: {} => {}", key, seconds) << std::endl;
-    }
-    DB::S3::ClientFactory::instance().shutdown();
+    if (true)
+        return;
+    //
+    //    std::vector<std::future<void>> put_results;
+    //    for (UInt64 i = 0; i < opts.s3_put_concurrency; ++i)
+    //    {
+    //        auto task = std::make_shared<std::packaged_task<void()>>(
+    //            [&]() {
+    //                putRandomObjectLoop(opts);
+    //            });
+    //        put_results.push_back(task->get_future());
+    //        DataStoreS3Pool::get().scheduleOrThrowOnError([task]() { (*task)(); });
+    //    }
+    //
+    //    std::vector<std::future<void>> get_results;
+    //    for (UInt64 i = 0; i < opts.s3_get_concurrency; ++i)
+    //    {
+    //        auto task = std::make_shared<std::packaged_task<void()>>(
+    //            [&]() {
+    //                getRandomObjectLoop(opts);
+    //            });
+    //        get_results.push_back(task->get_future());
+    //        S3FileCachePool::get().scheduleOrThrowOnError([task]() { (*task)(); });
+    //    }
+    //    for (auto & f : put_results)
+    //    {
+    //        f.get();
+    //    }
+    //
+    //    for (auto & f : get_results)
+    //    {
+    //        f.get();
+    //    }
+    //
+    //    {
+    //        auto [key, seconds] = s3_stat.getMaxPutStat();
+    //        std::cout << fmt::format("max put time: {} => {}", key, seconds) << std::endl;
+    //    }
+    //    {
+    //        auto [key, seconds] = s3_stat.getMaxGetStat();
+    //        std::cout << fmt::format("max get time: {} => {}", key, seconds) << std::endl;
+    //    }
+    //    DB::S3::ClientFactory::instance().shutdown();
 }
 
 int DTWorkload::mainEntry(int argc, char ** argv)
